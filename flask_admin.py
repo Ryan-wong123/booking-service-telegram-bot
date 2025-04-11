@@ -1,16 +1,20 @@
-
-# ========================
-# flask_admin.py (no staff_id)
-# ========================
-
 from flask import Flask, render_template, request, redirect, session, url_for
 import aiosqlite
 import asyncio
 from datetime import datetime
+from functools import wraps
 
 app = Flask(__name__)
 app.secret_key = 'your_secret_key'
 DB_PATH = "appointments.db"
+
+def login_required(f):
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        if not session.get('logged_in'):
+            return redirect(url_for('login'))
+        return f(*args, **kwargs)
+    return decorated_function
 
 # --- Login ---
 @app.route('/', methods=['GET', 'POST'])
@@ -18,17 +22,19 @@ def login():
     if request.method == 'POST':
         if request.form['username'] == 'admin' and request.form['password'] == '1234':
             session['logged_in'] = True
-            return redirect('/dashboard')
+            return redirect(url_for('dashboard'))
         return render_template('login.html', error="Invalid credentials.")
     return render_template('login.html')
 
 @app.route('/logout')
+@login_required
 def logout():
     session.clear()
-    return redirect('/')
+    return redirect(url_for('login'))
 
 # --- Dashboard View ---
 @app.route('/dashboard', methods=['GET', 'POST'])
+@login_required
 def dashboard():
     if not session.get('logged_in'):
         return redirect('/')
@@ -47,6 +53,7 @@ def dashboard():
     return render_template('dashboard.html', today=today, selected_date=selected_date, slots=slots, bookings=bookings)
 
 @app.route('/delete/<int:id>')
+@login_required
 def delete_slot(id):
     if not session.get('logged_in'):
         return redirect('/')

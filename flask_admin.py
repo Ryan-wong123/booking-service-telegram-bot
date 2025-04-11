@@ -111,8 +111,13 @@ async def remove_slot(rowid):
 
 async def fetch_all_appointments():
     async with aiosqlite.connect(DB_PATH) as db:
-        async with db.execute("SELECT username, date, time, type FROM appointments ORDER BY date, time") as cursor:
+        async with db.execute("""
+            SELECT username, date, time, type, zoom_link 
+            FROM appointments 
+            ORDER BY date, time
+        """) as cursor:
             return await cursor.fetchall()
+
 
 async def fetch_all_slots():
     async with aiosqlite.connect(DB_PATH) as db:

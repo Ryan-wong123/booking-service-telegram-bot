@@ -12,6 +12,8 @@ from telegram.ext import (
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from datetime import datetime, timedelta
 import nest_asyncio
+import subprocess
+
 nest_asyncio.apply()
 
 DB_PATH = "appointments.db"
@@ -183,4 +185,6 @@ async def main():
     await app.run_polling()
 
 if __name__ == "__main__":
+    subprocess.run(["python", "init_db.py"])
+    subprocess.run(["python", "flask_admin.py"])
     asyncio.run(main())

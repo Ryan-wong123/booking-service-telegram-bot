@@ -88,7 +88,9 @@
             {% set date_str = first_day.replace(day=day).strftime('%Y-%m-%d') %}
             {% set status_class = date_status.get(date_str, 'green') %}
             <td class="{{ status_class }} {% if date_str == today_str %}today{% endif %} {% if date_str == selected_date %}selected{% endif %}">
-              {{ day }}
+              <a href="{{ url_for('dashboard', category=category, selected_date=date_str) }}" class="text-dark text-decoration-none">
+                {{ day }}
+              </a>            
             </td>
           {% else %}
             <td></td>

@@ -11,7 +11,7 @@
     <a href="/logout" class="btn btn-outline-danger">Logout</a>
   </div>
 
-  <!-- Category and Month/Year Filter -->
+  <!-- Filter Section using input type="month" -->
   <form method="get" class="row g-3 mb-4 align-items-end">
     <div class="col-auto">
       <label for="category" class="form-label">View:</label>
@@ -22,20 +22,9 @@
       </select>
     </div>
     <div class="col-auto">
-      <label for="month" class="form-label">Month:</label>
-      <select class="form-select" name="month">
-        {% for m in range(1, 13) %}
-          <option value="{{ m }}" {% if m == month %}selected{% endif %}>{{ '{:02d}'.format(m) }}</option>
-        {% endfor %}
-      </select>
-    </div>
-    <div class="col-auto">
-      <label for="year" class="form-label">Year:</label>
-      <select class="form-select" name="year">
-        {% for y in year_range %}
-          <option value="{{ y }}" {% if y == year %}selected{% endif %}>{{ y }}</option>
-        {% endfor %}
-      </select>
+      <label for="month_year" class="form-label">Month:</label>
+      <input type="month" class="form-control" name="month_year" id="month_year"
+             value="{{ '%04d-%02d' % (year, month) }}">
     </div>
     <div class="col-auto">
       <button type="submit" class="btn btn-primary">Apply Filter</button>
@@ -91,7 +80,7 @@
               'red': 'bg-danger-subtle'
             }[date_status.get(date_str, 'green')] %}
             <td class="{{ status_class }} border {% if date_str == today_str %}fw-bold border-dark{% endif %} {% if date_str == selected_date %}border-primary border-2{% endif %}"
-                onclick="window.location='{{ url_for('dashboard', category=category, selected_date=date_str, month=month, year=year) }}'"
+                onclick="window.location='{{ url_for('dashboard', category=category, selected_date=date_str, month_year='%04d-%02d' % (year, month)) }}'"
                 style="cursor:pointer">
               {{ day }}
             </td>

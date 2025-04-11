@@ -1,4 +1,4 @@
-# flask_admin.py (supports dropdowns for month/year selection)
+# flask_admin.py (uses input type='month' for calendar filtering)
 
 from flask import Flask, render_template, request, redirect, session, url_for
 import aiosqlite
@@ -39,15 +39,23 @@ def logout():
 def dashboard():
     category = request.args.get("category", "both")
     selected_date = request.args.get("selected_date")
-    month = int(request.args.get("month", datetime.today().month))
-    year = int(request.args.get("year", datetime.today().year))
+
+    # use month picker value if provided
+    month_year = request.args.get("month_year")
+    if month_year:
+        year, month = map(int, month_year.split("-"))
+    else:
+        today_dt = datetime.today()
+        year = today_dt.year
+        month = today_dt.month
+
     today = datetime(year, month, 1)
 
     if request.method == 'POST':
         date = request.form['date']
         time = request.form['time']
-        asyncio.run(save_slot(date, time))  # ✅ FIXED: Save slot before redirecting
-        return redirect(f"/dashboard?category={category}&selected_date={selected_date or date}&month={month}&year={year}")
+        asyncio.run(save_slot(date, time))
+        return redirect(f"/dashboard?category={category}&selected_date={selected_date or date}&month_year={year:04d}-{month:02d}")
 
     all_slots = asyncio.run(fetch_all_slots())
     all_bookings = asyncio.run(fetch_all_appointments())
@@ -55,10 +63,6 @@ def dashboard():
     slots = [s for s in all_slots if s[1] == selected_date] if selected_date and category in ["both", "available"] else all_slots if category in ["both", "available"] else []
     bookings = [b for b in all_bookings if b[1] == selected_date] if selected_date and category in ["both", "confirmed"] else all_bookings if category in ["both", "confirmed"] else []
     date_status = asyncio.run(get_date_status_map())
-
-    # Generate year range for dropdown (current year +/- 5)
-    current_year = datetime.today().year
-    year_range = list(range(current_year - 5, current_year + 6))
 
     return render_template("dashboard.html",
                            slots=slots,
@@ -68,7 +72,6 @@ def dashboard():
                            selected_date=selected_date,
                            month=month,
                            year=year,
-                           year_range=year_range,
                            date_status=date_status)
 
 @app.route('/delete/<int:id>')
@@ -128,4 +131,4 @@ async def get_date_status_map():
     return date_status
 
 if __name__ == '__main__':
-    app.run(debug=True)
+    app.run(host='0.0.0.0', port=5000)

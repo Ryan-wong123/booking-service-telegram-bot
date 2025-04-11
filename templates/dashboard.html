@@ -31,10 +31,6 @@
       <label for="date" class="form-label">Select Date:</label>
       <input type="date" name="date" id="date" class="form-control" value="{{ selected_date }}">
     </div>
-    <div class="col-auto">
-      <label for="staff_id" class="form-label">Filter by Staff ID:</label>
-      <input type="text" name="staff_id" id="staff_id" class="form-control" value="{{ staff_filter or '' }}">
-    </div>
     <div class="col-auto align-self-end">
       <button type="submit" class="btn btn-primary">Apply Filters</button>
     </div>
@@ -46,20 +42,16 @@
     <div class="card-body">
       <form method="post">
         <div class="row g-3">
-          <div class="col-md-2">
-            <label class="form-label">Staff ID:</label>
-            <input type="number" name="staff_id" class="form-control" required>
-          </div>
-          <div class="col-md-3">
+          <div class="col-md-4">
             <label class="form-label">Date:</label>
             <input type="date" name="date" class="form-control" required>
           </div>
-          <div class="col-md-2">
+          <div class="col-md-4">
             <label class="form-label">Time:</label>
             <input type="time" name="time" class="form-control" required>
           </div>
-          <div class="col-md-2 align-self-end">
-            <button type="submit" class="btn btn-success">Add</button>
+          <div class="col-md-4 align-self-end">
+            <button type="submit" class="btn btn-success w-100">Add</button>
           </div>
         </div>
       </form>
@@ -88,7 +80,7 @@
           {% if day > 0 and day <= total_days %}
             {% set date_str = first_day.replace(day=day).strftime('%Y-%m-%d') %}
             <td class="{% if date_str == today_str %}today{% endif %} {% if date_str == selected_date %}selected{% endif %}">
-              <a href="?date={{ date_str }}{% if staff_filter %}&staff_id={{ staff_filter }}{% endif %}">{{ day }}</a>
+              <a href="?date={{ date_str }}">{{ day }}</a>
             </td>
           {% else %}
             <td></td>
@@ -108,8 +100,7 @@
           {% for b in bookings %}
             <li class="list-group-item d-flex justify-content-between align-items-center">
               <span>
-                <a href="https://t.me/{{ b[0] }}" target="_blank">@{{ b[0] }}</a>
-                → Staff {{ b[1] }} at {{ b[2] }} ({{ b[3] }})
+                <a href="https://t.me/{{ b[0] }}" target="_blank">@{{ b[0] }}</a> at {{ b[1] }} ({{ b[2] }})
               </span>
               <span class="badge bg-success">✔</span>
             </li>
@@ -119,14 +110,14 @@
         <div class="alert alert-secondary mt-2">No confirmed bookings.</div>
       {% endif %}
     </div>
-    
+
     <div class="col-md-6">
       <h4>🟢 Available Slots for {{ selected_date }}</h4>
       {% if slots %}
         <ul class="list-group">
           {% for s in slots %}
             <li class="list-group-item d-flex justify-content-between align-items-center">
-              Staff {{ s[1] }} at {{ s[2] }}
+              {{ s[1] }}
               <a href="{{ url_for('delete_slot', id=s[0]) }}" class="btn btn-sm btn-outline-danger">❌</a>
             </li>
           {% endfor %}

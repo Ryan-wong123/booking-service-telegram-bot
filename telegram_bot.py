@@ -13,7 +13,8 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from datetime import datetime, timedelta
 import nest_asyncio
 import subprocess
-
+import threading
+from flask_admin import app as flask_app
 nest_asyncio.apply()
 
 DB_PATH = "appointments.db"
@@ -184,7 +185,12 @@ async def main():
     print("🤖 Telegram bot is running...")
     await app.run_polling()
 
+def run_flask():
+    flask_app.run(host="0.0.0.0", port=5000)
+
 if __name__ == "__main__":
     subprocess.run(["python", "init_db.py"])
-    subprocess.run(["python", "flask_admin.py"])
+    flask_thread = threading.Thread(target=run_flask)
+    flask_thread.daemon = True
+    flask_thread.start()
     asyncio.run(main())

@@ -10,29 +10,36 @@
       text-align: center;
       padding: 0.5rem;
     }
+    .calendar td.green { background-color: #d4edda; }
+    .calendar td.yellow { background-color: #fff3cd; }
+    .calendar td.red { background-color: #f8d7da; }
     .calendar .today {
       font-weight: bold;
-      background-color: #f0f8ff;
+      border: 2px solid #000;
     }
     .calendar .selected {
-      background-color: #cce5ff;
+      border: 2px solid #007bff;
     }
   </style>
 </head>
 <body class="container py-4">
   <div class="d-flex justify-content-between align-items-center mb-4">
-    <h2>📅 Combined Calendar Dashboard</h2>
+    <h2>📋 Admin Booking Overview</h2>
     <a href="/logout" class="btn btn-outline-danger">Logout</a>
   </div>
 
-  <!-- Filter Section -->
+  <!-- Category Filter -->
   <form method="get" class="row g-3 mb-4">
     <div class="col-auto">
-      <label for="date" class="form-label">Select Date:</label>
-      <input type="date" name="date" id="date" class="form-control" value="{{ selected_date }}">
+      <label for="category" class="form-label">View:</label>
+      <select class="form-select" name="category">
+        <option value="both" {% if category == 'both' %}selected{% endif %}>Confirmed & Available</option>
+        <option value="confirmed" {% if category == 'confirmed' %}selected{% endif %}>Confirmed Only</option>
+        <option value="available" {% if category == 'available' %}selected{% endif %}>Available Only</option>
+      </select>
     </div>
     <div class="col-auto align-self-end">
-      <button type="submit" class="btn btn-primary">Apply Filters</button>
+      <button type="submit" class="btn btn-primary">Apply Filter</button>
     </div>
   </form>
 
@@ -58,8 +65,8 @@
     </div>
   </div>
 
-  <!-- Calendar Grid (current month only) -->
-  <h4 class="mb-3">📆 Calendar View</h4>
+  <!-- Calendar View -->
+  <h4 class="mb-3">📆 Calendar Overview</h4>
   <table class="table table-bordered calendar mb-4">
     <thead>
       <tr>
@@ -79,8 +86,9 @@
           {% set day = week * 7 + dow - first_day.weekday() + 1 %}
           {% if day > 0 and day <= total_days %}
             {% set date_str = first_day.replace(day=day).strftime('%Y-%m-%d') %}
-            <td class="{% if date_str == today_str %}today{% endif %} {% if date_str == selected_date %}selected{% endif %}">
-              <a href="?date={{ date_str }}">{{ day }}</a>
+            {% set status_class = date_status.get(date_str, 'green') %}
+            <td class="{{ status_class }} {% if date_str == today_str %}today{% endif %} {% if date_str == selected_date %}selected{% endif %}">
+              {{ day }}
             </td>
           {% else %}
             <td></td>
@@ -93,39 +101,43 @@
 
   <!-- Appointments and Availability -->
   <div class="row">
+    {% if category != 'available' %}
     <div class="col-md-6">
-      <h4>✅ Confirmed Appointments for {{ selected_date }}</h4>
+      <h4>✅ All Confirmed Appointments</h4>
       {% if bookings %}
         <ul class="list-group">
           {% for b in bookings %}
             <li class="list-group-item d-flex justify-content-between align-items-center">
               <span>
-                <a href="https://t.me/{{ b[0] }}" target="_blank">@{{ b[0] }}</a> at {{ b[1] }} ({{ b[2] }})
+                <a href="https://t.me/{{ b[0] }}" target="_blank">@{{ b[0] }}</a> → {{ b[1] }} at {{ b[2] }} ({{ b[3] }})
               </span>
               <span class="badge bg-success">✔</span>
             </li>
           {% endfor %}
         </ul>
       {% else %}
-        <div class="alert alert-secondary mt-2">No confirmed bookings.</div>
+        <div class="alert alert-secondary mt-2">No confirmed bookings found.</div>
       {% endif %}
     </div>
+    {% endif %}
 
+    {% if category != 'confirmed' %}
     <div class="col-md-6">
-      <h4>🟢 Available Slots for {{ selected_date }}</h4>
+      <h4>🟢 All Available Slots</h4>
       {% if slots %}
         <ul class="list-group">
           {% for s in slots %}
             <li class="list-group-item d-flex justify-content-between align-items-center">
-              {{ s[1] }}
+              {{ s[1] }} at {{ s[2] }}
               <a href="{{ url_for('delete_slot', id=s[0]) }}" class="btn btn-sm btn-outline-danger">❌</a>
             </li>
           {% endfor %}
         </ul>
       {% else %}
-        <div class="alert alert-warning mt-2">No available slots.</div>
+        <div class="alert alert-warning mt-2">No available slots found.</div>
       {% endif %}
     </div>
+    {% endif %}
   </div>
 </body>
 </html>

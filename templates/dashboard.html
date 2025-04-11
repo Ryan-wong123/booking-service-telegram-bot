@@ -107,7 +107,10 @@
         <ul class="list-group">
           {% for b in bookings %}
             <li class="list-group-item d-flex justify-content-between align-items-center">
-              User {{ b[0] }} → Staff {{ b[1] }} at {{ b[2] }} [{{ b[3] }}]
+              <span>
+                <a href="https://t.me/{{ b[0] }}" target="_blank">@{{ b[0] }}</a>
+                → Staff {{ b[1] }} at {{ b[2] }} ({{ b[3] }})
+              </span>
               <span class="badge bg-success">✔</span>
             </li>
           {% endfor %}
@@ -116,7 +119,7 @@
         <div class="alert alert-secondary mt-2">No confirmed bookings.</div>
       {% endif %}
     </div>
-
+    
     <div class="col-md-6">
       <h4>🟢 Available Slots for {{ selected_date }}</h4>
       {% if slots %}

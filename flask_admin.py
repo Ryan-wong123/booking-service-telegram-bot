@@ -102,7 +102,7 @@ async def fetch_appointments():
             return await cursor.fetchall()
         
 async def fetch_appointments_by_date(date, staff_id=None):
-    query = "SELECT user_id, staff_id, time, type FROM appointments WHERE date = ?"
+    query = "SELECT username, staff_id, time, type FROM appointments WHERE date = ?"
     params = [date]
     if staff_id:
         query += " AND staff_id = ?"
@@ -110,6 +110,7 @@ async def fetch_appointments_by_date(date, staff_id=None):
     async with aiosqlite.connect(DB_PATH) as db:
         async with db.execute(query + " ORDER BY time", params) as cursor:
             return await cursor.fetchall()
+
 
 async def fetch_slots_by_date(date, staff_id=None):
     query = "SELECT rowid, staff_id, time FROM availability WHERE date = ?"

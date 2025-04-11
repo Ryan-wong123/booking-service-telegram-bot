@@ -5,23 +5,39 @@ DB_PATH = "appointments.db"
 
 async def init_db():
     async with aiosqlite.connect(DB_PATH) as db:
-        await db.execute("""CREATE TABLE IF NOT EXISTS users (
-            user_id INTEGER PRIMARY KEY,
-            role TEXT
-        )""")
-        await db.execute("""CREATE TABLE IF NOT EXISTS availability (
-            staff_id INTEGER,
-            date TEXT,
-            time TEXT
-        )""")
-        await db.execute("""CREATE TABLE IF NOT EXISTS appointments (
-            user_id INTEGER,
-            staff_id INTEGER,
-            date TEXT,
-            time TEXT,
-            type TEXT
-        )""")
-        await db.commit()
-    print("✅ Tables created successfully.")
+        # Users table (used to store staff/customer roles)
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS users (
+                user_id INTEGER PRIMARY KEY,
+                role TEXT
+            )
+        """)
 
-asyncio.run(init_db())
+        # Availability table (available time slots set by staff via Flask)
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS availability (
+                rowid INTEGER PRIMARY KEY AUTOINCREMENT,
+                staff_id INTEGER,
+                date TEXT,
+                time TEXT
+            )
+        """)
+
+        # Appointments table (booked slots, confirmed via Telegram)
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS appointments (
+                user_id INTEGER,
+                username TEXT,
+                staff_id INTEGER,
+                date TEXT,
+                time TEXT,
+                type TEXT
+            )
+        """)
+
+        await db.commit()
+        print("✅ Database initialized successfully.")
+
+# Run it
+if __name__ == "__main__":
+    asyncio.run(init_db())

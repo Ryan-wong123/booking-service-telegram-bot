@@ -87,11 +87,11 @@
           {% if day > 0 and day <= total_days %}
             {% set date_str = first_day.replace(day=day).strftime('%Y-%m-%d') %}
             {% set status_class = date_status.get(date_str, 'green') %}
-            <td class="{{ status_class }} {% if date_str == today_str %}today{% endif %} {% if date_str == selected_date %}selected{% endif %}">
-              <a href="{{ url_for('dashboard', category=category, selected_date=date_str) }}" class="text-dark text-decoration-none">
-                {{ day }}
-              </a>            
-            </td>
+            <td onclick="window.location='{{ url_for('dashboard', category=category, selected_date=date_str) }}'"
+            class="{{ status_class }} {% if date_str == today_str %}today{% endif %} {% if date_str == selected_date %}selected{% endif %}"
+            style="cursor: pointer;">
+          {{ day }}
+        </td>        
           {% else %}
             <td></td>
           {% endif %}

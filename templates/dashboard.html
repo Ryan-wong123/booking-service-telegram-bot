@@ -12,7 +12,8 @@
   </div>
 
   <!-- Filter Section using input type="month" -->
-  <form method="get" class="row g-3 mb-4 align-items-end">
+  <form method="get" action="/dashboard" class="row g-3 mb-4 align-items-end">
+    <input type="hidden" name="selected_date" value="">
     <div class="col-auto">
       <label for="category" class="form-label">View:</label>
       <select class="form-select" name="category">

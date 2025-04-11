@@ -1,4 +1,4 @@
-# flask_admin.py (uses input type='month' for calendar filtering)
+# flask_admin.py (cleans selected_date on month/year filtering and post submission)
 
 from flask import Flask, render_template, request, redirect, session, url_for
 import aiosqlite
@@ -38,10 +38,9 @@ def logout():
 @login_required
 def dashboard():
     category = request.args.get("category", "both")
-    selected_date = request.args.get("selected_date")
-
-    # use month picker value if provided
+    selected_date = request.args.get("selected_date") or None
     month_year = request.args.get("month_year")
+
     if month_year:
         year, month = map(int, month_year.split("-"))
     else:
@@ -55,13 +54,32 @@ def dashboard():
         date = request.form['date']
         time = request.form['time']
         asyncio.run(save_slot(date, time))
-        return redirect(f"/dashboard?category={category}&selected_date={selected_date or date}&month_year={year:04d}-{month:02d}")
+        return redirect(f"/dashboard?category={category}&month_year={year:04d}-{month:02d}")  # clear selected_date
 
     all_slots = asyncio.run(fetch_all_slots())
     all_bookings = asyncio.run(fetch_all_appointments())
 
-    slots = [s for s in all_slots if s[1] == selected_date] if selected_date and category in ["both", "available"] else all_slots if category in ["both", "available"] else []
-    bookings = [b for b in all_bookings if b[1] == selected_date] if selected_date and category in ["both", "confirmed"] else all_bookings if category in ["both", "confirmed"] else []
+    def date_matches_month(date_str, year, month):
+        try:
+            d = datetime.strptime(date_str, "%Y-%m-%d")
+            return d.year == year and d.month == month
+        except:
+            return False
+
+    slots = []
+    if category in ["both", "available"]:
+        if selected_date:
+            slots = [s for s in all_slots if s[1] == selected_date]
+        else:
+            slots = [s for s in all_slots if date_matches_month(s[1], year, month)]
+
+    bookings = []
+    if category in ["both", "confirmed"]:
+        if selected_date:
+            bookings = [b for b in all_bookings if b[1] == selected_date]
+        else:
+            bookings = [b for b in all_bookings if date_matches_month(b[1], year, month)]
+
     date_status = asyncio.run(get_date_status_map())
 
     return render_template("dashboard.html",
@@ -131,4 +149,4 @@ async def get_date_status_map():
     return date_status
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000)
+    app.run(debug=True)

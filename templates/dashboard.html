@@ -28,8 +28,8 @@
     <a href="/logout" class="btn btn-outline-danger">Logout</a>
   </div>
 
-  <!-- Category Filter -->
-  <form method="get" class="row g-3 mb-4">
+  <!-- Category and Month/Year Filter -->
+  <form method="get" class="row g-3 mb-4 align-items-end">
     <div class="col-auto">
       <label for="category" class="form-label">View:</label>
       <select class="form-select" name="category">
@@ -38,7 +38,23 @@
         <option value="available" {% if category == 'available' %}selected{% endif %}>Available Only</option>
       </select>
     </div>
-    <div class="col-auto align-self-end">
+    <div class="col-auto">
+      <label for="month" class="form-label">Month:</label>
+      <select class="form-select" name="month">
+        {% for m in range(1, 13) %}
+          <option value="{{ m }}" {% if m == month %}selected{% endif %}>{{ '{:02d}'.format(m) }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="col-auto">
+      <label for="year" class="form-label">Year:</label>
+      <select class="form-select" name="year">
+        {% for y in year_range %}
+          <option value="{{ y }}" {% if y == year %}selected{% endif %}>{{ y }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="col-auto">
       <button type="submit" class="btn btn-primary">Apply Filter</button>
     </div>
   </form>
@@ -78,7 +94,7 @@
       {% set first_day = today.replace(day=1) %}
       {% set start_dow = first_day.weekday() %}
       {% set total_days = (first_day.replace(month=first_day.month % 12 + 1, day=1) - first_day).days %}
-      {% set today_str = today.strftime('%Y-%m-%d') %}
+      {% set today_str = first_day.strftime('%Y-%m-%d') %}
 
       {% for week in range(6) %}
       <tr>
@@ -87,11 +103,11 @@
           {% if day > 0 and day <= total_days %}
             {% set date_str = first_day.replace(day=day).strftime('%Y-%m-%d') %}
             {% set status_class = date_status.get(date_str, 'green') %}
-            <td onclick="window.location='{{ url_for('dashboard', category=category, selected_date=date_str) }}'"
-            class="{{ status_class }} {% if date_str == today_str %}today{% endif %} {% if date_str == selected_date %}selected{% endif %}"
-            style="cursor: pointer;">
-          {{ day }}
-        </td>        
+            <td class="{{ status_class }} {% if date_str == today_str %}today{% endif %} {% if date_str == selected_date %}selected{% endif %}"
+                onclick="window.location='{{ url_for('dashboard', category=category, selected_date=date_str, month=month, year=year) }}'"
+                style="cursor:pointer">
+              {{ day }}
+            </td>
           {% else %}
             <td></td>
           {% endif %}
@@ -105,7 +121,7 @@
   <div class="row">
     {% if category != 'available' %}
     <div class="col-md-6">
-      <h4>✅ All Confirmed Appointments</h4>
+      <h4>✅ Confirmed Appointments{% if selected_date %} for {{ selected_date }}{% endif %}</h4>
       {% if bookings %}
         <ul class="list-group">
           {% for b in bookings %}
@@ -125,7 +141,7 @@
 
     {% if category != 'confirmed' %}
     <div class="col-md-6">
-      <h4>🟢 All Available Slots</h4>
+      <h4>🟢 Available Slots{% if selected_date %} for {{ selected_date }}{% endif %}</h4>
       {% if slots %}
         <ul class="list-group">
           {% for s in slots %}

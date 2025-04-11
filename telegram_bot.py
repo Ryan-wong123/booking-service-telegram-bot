@@ -1,5 +1,5 @@
 # ========================
-# telegram_bot.py (admin ID registration + scheduler fix)
+# telegram_bot.py (multi-admin support)
 # ========================
 
 import asyncio
@@ -17,20 +17,22 @@ import nest_asyncio
 nest_asyncio.apply()
 
 DB_PATH = "appointments.db"
-ADMIN_DB = "admin_id.txt"  # 🗂️ File to persist admin ID(s)
+ADMIN_DB = "admin_ids.txt"  # 🗂️ File to persist multiple admin IDs
 
-# --- Utility to get admin chat ID ---
-def get_admin_id():
+# --- Load all admin chat IDs ---
+def get_admin_ids():
     try:
         with open(ADMIN_DB, 'r') as f:
-            return int(f.read().strip())
+            return [int(line.strip()) for line in f if line.strip().isdigit()]
     except:
-        return None
+        return []
 
-# --- Save new admin ID ---
+# --- Save or append a new admin ID ---
 def save_admin_id(admin_id):
-    with open(ADMIN_DB, 'w') as f:
-        f.write(str(admin_id))
+    current_ids = set(get_admin_ids())
+    if admin_id not in current_ids:
+        with open(ADMIN_DB, 'a') as f:
+            f.write(f"{admin_id}\n")
 
 # --- Reminder scheduling ---
 async def schedule_reminder(bot, user_id, date_str, time_str, scheduler):
@@ -63,7 +65,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def register_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
     admin_id = update.effective_user.id
     save_admin_id(admin_id)
-    await update.message.reply_text(f"✅ Registered you as the admin. Your user ID is {admin_id}.")
+    await update.message.reply_text(f"✅ You have been added to the admin list. Your user ID is {admin_id}.")
 
 # --- /book command ---
 async def book(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -109,8 +111,7 @@ async def confirm_booking(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.edit_message_text(f"✅ Appointment booked for {date} at {time}.")
     await schedule_reminder(context.bot, user_id, date, time, context.application.scheduler)
 
-    admin_id = get_admin_id()
-    if admin_id:
+    for admin_id in get_admin_ids():
         await context.bot.send_message(
             chat_id=admin_id,
             text=f"📌 New Booking:\nUser @{username} booked {date} at {time}."
@@ -155,8 +156,7 @@ async def cancel_appointment(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
     await query.edit_message_text(f"🗑️ Your appointment on {date} at {time} has been cancelled.")
 
-    admin_id = get_admin_id()
-    if admin_id:
+    for admin_id in get_admin_ids():
         await context.bot.send_message(
             chat_id=admin_id,
             text=f"❌ Cancellation:\nUser @{username} cancelled {date} at {time}."
@@ -168,7 +168,7 @@ async def main():
     scheduler.start()
 
     app = ApplicationBuilder().token("7086293632:AAHbp_uUi0AJ9EeJWQ8lSpp9yvAJBiKFZD8").build()
-    app.scheduler = scheduler  # Inject scheduler so we can access it in handlers
+    app.scheduler = scheduler
 
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("help", help_command))

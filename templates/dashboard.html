@@ -1,54 +1,137 @@
 <!DOCTYPE html>
-<html>
-<head><title>Admin Dashboard</title></head>
-<body>
-  <h2>Welcome, Admin</h2>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Admin Dashboard</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+  <style>
+    td, th {
+      width: 14.28%;
+      text-align: center;
+      padding: 0.5rem;
+    }
+    .calendar .today {
+      font-weight: bold;
+      background-color: #f0f8ff;
+    }
+    .calendar .selected {
+      background-color: #cce5ff;
+    }
+  </style>
+</head>
+<body class="container py-4">
+  <div class="d-flex justify-content-between align-items-center mb-4">
+    <h2>📅 Combined Calendar Dashboard</h2>
+    <a href="/logout" class="btn btn-outline-danger">Logout</a>
+  </div>
 
-  <form method="post">
-    <label>Staff ID:</label><br>
-    <input type="number" name="staff_id" required><br>
-
-    <label>Date:</label><br>
-    <input type="date" name="date" required><br>
-
-    <label>Time:</label><br>
-    <input type="time" name="time" required><br><br>
-
-    <button type="submit">Add Availability</button>
+  <!-- Filter Section -->
+  <form method="get" class="row g-3 mb-4">
+    <div class="col-auto">
+      <label for="date" class="form-label">Select Date:</label>
+      <input type="date" name="date" id="date" class="form-control" value="{{ selected_date }}">
+    </div>
+    <div class="col-auto">
+      <label for="staff_id" class="form-label">Filter by Staff ID:</label>
+      <input type="text" name="staff_id" id="staff_id" class="form-control" value="{{ staff_filter or '' }}">
+    </div>
+    <div class="col-auto align-self-end">
+      <button type="submit" class="btn btn-primary">Apply Filters</button>
+    </div>
   </form>
 
-  <hr>
+  <!-- Add Slot Form -->
+  <div class="card mb-4">
+    <div class="card-header">Add New Availability</div>
+    <div class="card-body">
+      <form method="post">
+        <div class="row g-3">
+          <div class="col-md-2">
+            <label class="form-label">Staff ID:</label>
+            <input type="number" name="staff_id" class="form-control" required>
+          </div>
+          <div class="col-md-3">
+            <label class="form-label">Date:</label>
+            <input type="date" name="date" class="form-control" required>
+          </div>
+          <div class="col-md-2">
+            <label class="form-label">Time:</label>
+            <input type="time" name="time" class="form-control" required>
+          </div>
+          <div class="col-md-2 align-self-end">
+            <button type="submit" class="btn btn-success">Add</button>
+          </div>
+        </div>
+      </form>
+    </div>
+  </div>
 
-  <h3>Available Slots:</h3>
-  {% if slots %}
-    <ul>
-      {% for slot in slots %}
-        <li>
-          Staff {{ slot[1] }} → {{ slot[2] }} at {{ slot[3] }}
-          <a href="{{ url_for('delete_slot', id=slot[0]) }}">❌ Delete</a>
-        </li>
+  <!-- Calendar Grid (current month only) -->
+  <h4 class="mb-3">📆 Calendar View</h4>
+  <table class="table table-bordered calendar mb-4">
+    <thead>
+      <tr>
+        <th>Sun</th><th>Mon</th><th>Tue</th><th>Wed</th>
+        <th>Thu</th><th>Fri</th><th>Sat</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% set first_day = today.replace(day=1) %}
+      {% set start_dow = first_day.weekday() %}
+      {% set total_days = (first_day.replace(month=first_day.month % 12 + 1, day=1) - first_day).days %}
+      {% set today_str = today.strftime('%Y-%m-%d') %}
+
+      {% for week in range(6) %}
+      <tr>
+        {% for dow in range(7) %}
+          {% set day = week * 7 + dow - first_day.weekday() + 1 %}
+          {% if day > 0 and day <= total_days %}
+            {% set date_str = first_day.replace(day=day).strftime('%Y-%m-%d') %}
+            <td class="{% if date_str == today_str %}today{% endif %} {% if date_str == selected_date %}selected{% endif %}">
+              <a href="?date={{ date_str }}{% if staff_filter %}&staff_id={{ staff_filter }}{% endif %}">{{ day }}</a>
+            </td>
+          {% else %}
+            <td></td>
+          {% endif %}
+        {% endfor %}
+      </tr>
       {% endfor %}
-    </ul>
-  {% else %}
-    <p>No available slots.</p>
-  {% endif %}
+    </tbody>
+  </table>
 
-  <hr>
+  <!-- Appointments and Availability -->
+  <div class="row">
+    <div class="col-md-6">
+      <h4>✅ Confirmed Appointments for {{ selected_date }}</h4>
+      {% if bookings %}
+        <ul class="list-group">
+          {% for b in bookings %}
+            <li class="list-group-item d-flex justify-content-between align-items-center">
+              User {{ b[0] }} → Staff {{ b[1] }} at {{ b[2] }} [{{ b[3] }}]
+              <span class="badge bg-success">✔</span>
+            </li>
+          {% endfor %}
+        </ul>
+      {% else %}
+        <div class="alert alert-secondary mt-2">No confirmed bookings.</div>
+      {% endif %}
+    </div>
 
-  <h3>Confirmed Appointments:</h3>
-  {% if bookings %}
-    <ul>
-      {% for b in bookings %}
-        <li>
-          User {{ b[0] }} → Staff {{ b[1] }} on {{ b[2] }} at {{ b[3] }} [{{ b[4] }}]
-        </li>
-      {% endfor %}
-    </ul>
-  {% else %}
-    <p>No confirmed bookings yet.</p>
-  {% endif %}
-
-  <hr>
-  <a href="/logout">Logout</a>
+    <div class="col-md-6">
+      <h4>🟢 Available Slots for {{ selected_date }}</h4>
+      {% if slots %}
+        <ul class="list-group">
+          {% for s in slots %}
+            <li class="list-group-item d-flex justify-content-between align-items-center">
+              Staff {{ s[1] }} at {{ s[2] }}
+              <a href="{{ url_for('delete_slot', id=s[0]) }}" class="btn btn-sm btn-outline-danger">❌</a>
+            </li>
+          {% endfor %}
+        </ul>
+      {% else %}
+        <div class="alert alert-warning mt-2">No available slots.</div>
+      {% endif %}
+    </div>
+  </div>
 </body>
 </html>

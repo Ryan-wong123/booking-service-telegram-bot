@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Calendar View</title>
+  <style>
+    table {
+      border-collapse: collapse;
+      width: 100%;
+    }
+    td, th {
+      border: 1px solid #ccc;
+      text-align: center;
+      padding: 10px;
+      cursor: pointer;
+    }
+    .today {
+      background-color: #f2f2f2;
+      font-weight: bold;
+    }
+    .selected {
+      background-color: #cce5ff;
+    }
+  </style>
+</head>
+<body>
+  <h2>📅 Admin Calendar View</h2>
+
+  <table>
+    <tr>
+      <th>Sun</th><th>Mon</th><th>Tue</th><th>Wed</th>
+      <th>Thu</th><th>Fri</th><th>Sat</th>
+    </tr>
+
+    {% set first_day = today.replace(day=1) %}
+    {% set start_day = first_day.weekday() %}
+    {% set days_in_month = (first_day.replace(month=first_day.month % 12 + 1, day=1) - first_day).days %}
+
+    {% set day_counter = 0 %}
+    {% for week in range(6) %}
+    <tr>
+      {% for dow in range(7) %}
+        {% set day_number = week * 7 + dow - first_day.weekday() + 1 %}
+        {% if day_number > 0 and day_number <= days_in_month %}
+          {% set date_string = first_day.replace(day=day_number).strftime('%Y-%m-%d') %}
+          <td class="{{ 'today' if date_string == today.strftime('%Y-%m-%d') else '' }} {{ 'selected' if selected_date == date_string else '' }}">
+            <a href="/calendar?date={{ date_string }}">{{ day_number }}</a>
+          </td>
+        {% else %}
+          <td></td>
+        {% endif %}
+      {% endfor %}
+    </tr>
+    {% endfor %}
+  </table>
+
+  {% if selected_date %}
+    <h3>📍 Details for {{ selected_date }}</h3>
+
+    <h4>✅ Confirmed Bookings</h4>
+    {% if confirmed %}
+      <ul>
+        {% for c in confirmed %}
+          <li>User {{ c[0] }} → Staff {{ c[1] }} at {{ c[2] }} ({{ c[3] }})</li>
+        {% endfor %}
+      </ul>
+    {% else %}
+      <p>No confirmed bookings.</p>
+    {% endif %}
+
+    <h4>🕓 Available Slots</h4>
+    {% if available %}
+      <ul>
+        {% for a in available %}
+          <li>Staff {{ a[0] }} at {{ a[1] }}</li>
+        {% endfor %}
+      </ul>
+    {% else %}
+      <p>No available slots.</p>
+    {% endif %}
+  {% endif %}
+
+  <br><a href="/dashboard">⬅ Back to Dashboard</a>
+</body>
+</html>

@@ -4,23 +4,6 @@
   <meta charset="UTF-8">
   <title>Admin Dashboard</title>
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
-  <style>
-    td, th {
-      width: 14.28%;
-      text-align: center;
-      padding: 0.5rem;
-    }
-    .calendar td.green { background-color: #d4edda; }
-    .calendar td.yellow { background-color: #fff3cd; }
-    .calendar td.red { background-color: #f8d7da; }
-    .calendar .today {
-      font-weight: bold;
-      border: 2px solid #000;
-    }
-    .calendar .selected {
-      border: 2px solid #007bff;
-    }
-  </style>
 </head>
 <body class="container py-4">
   <div class="d-flex justify-content-between align-items-center mb-4">
@@ -83,8 +66,8 @@
 
   <!-- Calendar View -->
   <h4 class="mb-3">📆 Calendar Overview</h4>
-  <table class="table table-bordered calendar mb-4">
-    <thead>
+  <table class="table table-bordered mb-4">
+    <thead class="table-light">
       <tr>
         <th>Sun</th><th>Mon</th><th>Tue</th><th>Wed</th>
         <th>Thu</th><th>Fri</th><th>Sat</th>
@@ -102,8 +85,12 @@
           {% set day = week * 7 + dow - first_day.weekday() + 1 %}
           {% if day > 0 and day <= total_days %}
             {% set date_str = first_day.replace(day=day).strftime('%Y-%m-%d') %}
-            {% set status_class = date_status.get(date_str, 'green') %}
-            <td class="{{ status_class }} {% if date_str == today_str %}today{% endif %} {% if date_str == selected_date %}selected{% endif %}"
+            {% set status_class = {
+              'green': 'bg-success-subtle',
+              'yellow': 'bg-warning-subtle',
+              'red': 'bg-danger-subtle'
+            }[date_status.get(date_str, 'green')] %}
+            <td class="{{ status_class }} border {% if date_str == today_str %}fw-bold border-dark{% endif %} {% if date_str == selected_date %}border-primary border-2{% endif %}"
                 onclick="window.location='{{ url_for('dashboard', category=category, selected_date=date_str, month=month, year=year) }}'"
                 style="cursor:pointer">
               {{ day }}

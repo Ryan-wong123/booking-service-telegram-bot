@@ -23,7 +23,7 @@ def login_required(f):
 @app.route('/', methods=['GET', 'POST'])
 def login():
     if request.method == 'POST':
-        if request.form['username'] == 'admin' and request.form['password'] == '1234':
+        if request.form['username'] == 'lucano' and request.form['password'] == 'lucano1234':
             session['logged_in'] = True
             return redirect('/dashboard')
         return render_template('login.html', error="Invalid credentials.")

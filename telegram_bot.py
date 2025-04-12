@@ -87,7 +87,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/book - View and book available slots\n"
         "/myappointments - View your appointments\n"
         "/help - Show this help message\n"
-        "/registeradmin - (admin only) register this user to receive alerts"
     )
     await update.message.reply_text(message)
 

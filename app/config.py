@@ -12,7 +12,7 @@ def _bool(name: str, default: bool) -> bool:
 
 def load_config() -> dict:
     env = os.environ.get("APP_ENV", "development")
-    db_url = os.environ.get("DATABASE_URL", "sqlite:///bookings.db")
+    db_url = os.environ.get("DATABASE_URL", "postgresql://booking:booking@localhost:5432/booking")
     if db_url.startswith("postgres://"):
         db_url = db_url.replace("postgres://", "postgresql://", 1)
     production = env == "production"

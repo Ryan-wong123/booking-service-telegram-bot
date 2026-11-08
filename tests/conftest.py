@@ -1,5 +1,7 @@
 from datetime import timedelta
 
+import os
+
 import pytest
 
 from app import create_app
@@ -17,7 +19,8 @@ def app(tmp_path):
             "TESTING": True,
             "SECRET_KEY": "test",
             "WTF_CSRF_ENABLED": False,
-            "SQLALCHEMY_DATABASE_URI": f"sqlite:///{tmp_path / 'test.db'}",
+            # Set TEST_DATABASE_URL to run the suite against PostgreSQL; default is a temp SQLite file.
+            "SQLALCHEMY_DATABASE_URI": os.environ.get("TEST_DATABASE_URL") or f"sqlite:///{tmp_path / 'test.db'}",
             "MAX_ACTIVE_BOOKINGS": 2,
             "LOCKOUT_ATTEMPTS": 3,
         }
@@ -28,6 +31,7 @@ def app(tmp_path):
         db.session.commit()
         yield app
         db.session.remove()
+        db.drop_all()
 
 
 def make_user(email, role, name=None, active=True):

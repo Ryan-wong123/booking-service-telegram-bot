@@ -23,13 +23,17 @@ Telegram features have been removed.)
 
 ## Configuration (environment variables)
 See `.env.example`. Key ones: `SECRET_KEY` (**required** when `APP_ENV=production`), `DATABASE_URL`
-(SQLite by default, PostgreSQL in Docker/Kubernetes), `SUPERADMIN_EMAIL`/`SUPERADMIN_PASSWORD` (first-run bootstrap),
+(PostgreSQL only; defaults to `postgresql://booking:booking@localhost:5432/booking`), `SUPERADMIN_EMAIL`/`SUPERADMIN_PASSWORD` (first-run bootstrap),
 `APP_TIMEZONE`, `MAX_ACTIVE_BOOKINGS`, `ALLOW_REGISTRATION`, `MIN_PASSWORD_LENGTH`, `ZOOM_*` (optional).
 
 ## Run locally
 ```bash
 python -m venv .venv && source .venv/bin/activate
 pip install -r requirements-dev.txt
+# Start only the database (data persists in the Docker volume `booking_pgdata`):
+export POSTGRES_PASSWORD=booking
+docker compose up -d db
+export DATABASE_URL=postgresql://booking:booking@localhost:5432/booking
 export SUPERADMIN_EMAIL=admin@example.com SUPERADMIN_PASSWORD='a-long-password-here'
 flask --app wsgi init-db
 flask --app wsgi run --debug
@@ -38,7 +42,7 @@ Create more users from the admin UI, or `flask --app wsgi create-user EMAIL "Nam
 
 ## Tests
 ```bash
-pytest
+pytest        # uses a throwaway SQLite file, no database server needed
 ```
 
 ## Docker
@@ -46,7 +50,8 @@ pytest
 cp .env.example .env     # edit the secrets first
 docker compose up --build
 ```
-The app is then at http://localhost:8000 (`init` runs once to create tables and the super admin).
+PostgreSQL runs in its own container with data on the named volume `booking_pgdata`, so it survives restarts and
+rebuilds (`docker compose down -v` deletes it). The app is at http://localhost:8000 (`init` runs once to create tables and the super admin).
 Over plain HTTP set `SESSION_COOKIE_SECURE=false`, otherwise browsers drop the login cookie.
 
 ## Deploy to AWS EC2 with Docker + Kubernetes

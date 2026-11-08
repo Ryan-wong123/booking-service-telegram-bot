@@ -1,0 +1,61 @@
+{% extends "base.html" %}
+{% from "_macros.html" import calendar %}
+{% block title %}My schedule{% endblock %}
+{% block content %}
+<h3 class="mb-3">My schedule</h3>
+<div class="card mb-4"><div class="card-header">Add availability</div><div class="card-body">
+  <form method="post" action="{{ url_for('staff.create_slots') }}" class="row g-3">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <input type="hidden" name="month" value="{{ cal.month }}">
+    <div class="col-md-3"><label class="form-label">Service</label>
+      <select class="form-select" name="service_id" required>
+        {% for s in services %}<option value="{{ s.id }}">{{ s.name }} ({{ s.duration_minutes }} min)</option>{% endfor %}
+      </select></div>
+    <div class="col-md-3"><label class="form-label">Date</label><input type="date" class="form-control" name="date" required></div>
+    <div class="col-md-2"><label class="form-label">First start</label><input type="time" class="form-control" name="time" required></div>
+    <div class="col-md-2"><label class="form-label">Back-to-back slots</label><input type="number" class="form-control" name="count" value="1" min="1" max="20" required></div>
+    <div class="col-md-2 align-self-end"><button class="btn btn-success w-100">Add</button></div>
+  </form>
+  <div class="form-text">Past times and overlaps with your existing slots are rejected.</div>
+</div></div>
+
+<div class="row"><div class="col-lg-7">
+  {{ calendar(cal, 'staff.dashboard', selected) }}
+  <p class="small text-muted"><span class="badge text-bg-success">&nbsp;</span> all free
+    <span class="badge text-bg-warning">&nbsp;</span> partly booked <span class="badge text-bg-danger">&nbsp;</span> fully booked</p>
+</div>
+<div class="col-lg-5">
+{% for date_key, items in groups.items() %}
+  <h5>{{ items[0].start_at|dlong if items else date_key }}</h5>
+  <ul class="list-group mb-3">
+  {% for s in items %}
+    {% set b = s.active_booking %}
+    <li class="list-group-item">
+      <div class="d-flex justify-content-between">
+        <span><strong>{{ s.start_at|tm }}–{{ s.end_at|tm }}</strong> · {{ s.service.name }}</span>
+        {% if b %}<span class="badge text-bg-{{ 'secondary' if b.status == 'completed' else 'success' }}">{{ b.status }}</span>
+        {% else %}<span class="badge text-bg-light text-dark border">open</span>{% endif %}
+      </div>
+      {% if b %}
+        <div class="small mt-1">👤 {{ b.customer.name }} ({{ b.customer.email }}){% if b.notes %}<br>Note: {{ b.notes }}{% endif %}
+          {% if b.zoom_link %}<br><a href="{{ b.zoom_link }}" target="_blank" rel="noopener noreferrer">Zoom link</a>{% endif %}</div>
+        {% if b.status == 'confirmed' %}
+        <div class="mt-2 d-flex gap-2">
+          {% if s.start_at <= now %}
+          <form method="post" action="{{ url_for('staff.complete_booking', booking_id=b.id) }}">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="btn btn-sm btn-outline-success">Mark completed</button></form>
+          {% else %}
+          <a class="btn btn-sm btn-outline-danger" href="{{ url_for('staff.cancel_booking', booking_id=b.id) }}">Cancel booking</a>
+          {% endif %}
+        </div>
+        {% endif %}
+      {% else %}
+        <form method="post" action="{{ url_for('staff.delete_slot', slot_id=s.id) }}" class="mt-2">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="btn btn-sm btn-outline-danger">Remove slot</button></form>
+      {% endif %}
+    </li>
+  {% else %}<li class="list-group-item text-muted">No slots on this day.</li>{% endfor %}
+  </ul>
+{% else %}<div class="alert alert-secondary">No slots this month. Add some above.</div>{% endfor %}
+</div></div>
+{% endblock %}

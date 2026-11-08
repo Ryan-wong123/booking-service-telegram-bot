@@ -1,0 +1,13 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: booking-config
+  namespace: booking
+data:
+  APP_ENV: "production"
+  APP_TIMEZONE: "Asia/Singapore"
+  MAX_ACTIVE_BOOKINGS: "3"
+  ALLOW_REGISTRATION: "true"
+  TRUST_PROXY: "true"
+  SESSION_COOKIE_SECURE: "true"   # set to "false" ONLY if you serve plain HTTP (not recommended)
+  LOG_LEVEL: "INFO"

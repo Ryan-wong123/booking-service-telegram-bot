@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+{% from "_macros.html" import pager, status_badge %}
+{% block title %}All bookings{% endblock %}
+{% block content %}
+<h3 class="mb-3">All bookings</h3>
+<div class="mb-3">
+  <a class="btn btn-sm {{ 'btn-dark' if not status else 'btn-outline-dark' }}" href="{{ url_for('admin.bookings') }}">All</a>
+  {% for s in ['confirmed','completed','cancelled'] %}<a class="btn btn-sm {{ 'btn-dark' if status == s else 'btn-outline-dark' }}" href="{{ url_for('admin.bookings', status=s) }}">{{ s }}</a>{% endfor %}
+</div>
+<table class="table table-striped bg-white align-middle">
+  <thead><tr><th>When</th><th>Service</th><th>Customer</th><th>Staff</th><th>Status</th><th></th></tr></thead>
+  <tbody>{% for b in page.items %}
+    <tr><td>{{ b.slot.start_at|dt }}</td><td>{{ b.slot.service.name }}</td><td>{{ b.customer.name }}<div class="small text-muted">{{ b.customer.email }}</div></td>
+      <td>{{ b.slot.staff.name }}</td><td>{{ status_badge(b, now) }}</td>
+      <td class="text-end">{% if b.status == 'confirmed' and b.slot.start_at > now %}<a class="btn btn-sm btn-outline-danger" href="{{ url_for('admin.booking_cancel', booking_id=b.id) }}">Cancel</a>{% endif %}</td></tr>
+  {% else %}<tr><td colspan="6" class="text-muted">No bookings.</td></tr>{% endfor %}</tbody>
+</table>
+{{ pager(page, 'admin.bookings', {'status': status} if status else {}) }}
+{% endblock %}

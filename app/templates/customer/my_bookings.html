@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% from "_macros.html" import status_badge %}
+{% block title %}My bookings{% endblock %}
+{% block content %}
+<h3 class="mb-3">My bookings</h3>
+<h5>Upcoming</h5>
+{% for b in upcoming %}
+<div class="card mb-2"><div class="card-body d-flex flex-wrap justify-content-between align-items-center gap-2">
+  <div>
+    <strong>{{ b.slot.start_at|dt }}</strong> · {{ b.slot.service.name }} with {{ b.slot.staff.name }}
+    {{ status_badge(b, now) }}
+    {% if b.zoom_link %}<div><a href="{{ b.zoom_link }}" target="_blank" rel="noopener noreferrer">Join Zoom meeting</a></div>{% endif %}
+    {% if b.notes %}<div class="small text-muted">Note: {{ b.notes }}</div>{% endif %}
+  </div>
+  <div>
+    <a class="btn btn-outline-primary btn-sm" href="{{ url_for('customer.reschedule', booking_id=b.id) }}">Reschedule</a>
+    <a class="btn btn-outline-danger btn-sm" href="{{ url_for('customer.cancel', booking_id=b.id) }}">Cancel</a>
+  </div>
+</div></div>
+{% else %}<div class="alert alert-secondary">No upcoming bookings. <a href="{{ url_for('customer.slots') }}">Book one</a>.</div>{% endfor %}
+
+{% if past %}
+<h5 class="mt-4">History</h5>
+<ul class="list-group">
+{% for b in past %}
+  <li class="list-group-item">
+    {{ b.slot.start_at|dt }} · {{ b.slot.service.name }} with {{ b.slot.staff.name }} {{ status_badge(b, now) }}
+    {% if b.status == 'cancelled' and b.cancelled_by_id and b.cancelled_by_id != current_user.id %}
+      <div class="small text-danger">Cancelled by {{ b.cancelled_by.name }}{% if b.cancel_reason %}: {{ b.cancel_reason }}{% endif %}</div>
+    {% endif %}
+  </li>
+{% endfor %}
+</ul>
+{% endif %}
+{% endblock %}

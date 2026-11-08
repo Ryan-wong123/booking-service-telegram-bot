@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% from "_macros.html" import calendar %}
+{% block title %}Book an appointment{% endblock %}
+{% block content %}
+<h3 class="mb-3">Book an appointment</h3>
+<form method="get" class="row g-2 mb-3 align-items-end">
+  <input type="hidden" name="month" value="{{ cal.month }}">
+  <div class="col-auto"><label class="form-label">Service</label>
+    <select class="form-select" name="service">
+      <option value="">All services</option>
+      {% for s in services %}<option value="{{ s.id }}" {{ 'selected' if s.id == service_id }}>{{ s.name }} ({{ s.duration_minutes }} min)</option>{% endfor %}
+    </select></div>
+  <div class="col-auto"><button class="btn btn-outline-primary">Filter</button></div>
+</form>
+<div class="row"><div class="col-lg-7">
+  {{ calendar(cal, 'customer.slots', selected, {'service': service_id} if service_id else {}) }}
+  <p class="small text-muted">Green days have free slots. Click a day to see times.</p>
+</div>
+<div class="col-lg-5">
+  {% for date_key, items in groups.items() %}
+    <h5>{{ items[0].start_at|dlong if items else date_key }}</h5>
+    <div class="list-group mb-3">
+    {% for s in items %}
+      <a class="list-group-item list-group-item-action d-flex justify-content-between" href="{{ url_for('customer.book', slot_id=s.id) }}">
+        <span><strong>{{ s.start_at|tm }}–{{ s.end_at|tm }}</strong> · {{ s.service.name }}</span>
+        <span class="text-muted">with {{ s.staff.name }}</span>
+      </a>
+    {% else %}<div class="list-group-item text-muted">No free slots on this day.</div>{% endfor %}
+    </div>
+  {% else %}<div class="alert alert-secondary">No available slots this month.</div>{% endfor %}
+</div></div>
+{% endblock %}

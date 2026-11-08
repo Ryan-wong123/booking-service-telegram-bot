@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+{% block title %}Cancel booking{% endblock %}
+{% block content %}
+<div class="row justify-content-center"><div class="col-md-7 col-lg-5">
+<div class="card shadow-sm border-danger"><div class="card-body">
+  <h4>Cancel this booking?</h4>
+  <p><strong>{{ booking.slot.start_at|dt }}</strong><br>{{ booking.slot.service.name }} with {{ booking.slot.staff.name }}</p>
+  <form method="post">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <div class="mb-3"><label class="form-label">Reason (optional)</label>
+      <input class="form-control" name="reason" maxlength="300"></div>
+    <button class="btn btn-danger">Yes, cancel it</button>
+    <a class="btn btn-link" href="{{ url_for('customer.my_bookings') }}">Keep booking</a>
+  </form>
+</div></div></div></div>
+{% endblock %}

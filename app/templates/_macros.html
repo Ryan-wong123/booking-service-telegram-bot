@@ -1,0 +1,44 @@
+{% macro csrf() %}<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">{% endmacro %}
+
+{# Month calendar. `endpoint` is the view to link to; `extra` are additional query args. #}
+{% macro calendar(cal, endpoint, selected=None, extra={}) %}
+<div class="d-flex justify-content-between align-items-center mb-2">
+  <a class="btn btn-outline-secondary btn-sm" href="{{ url_for(endpoint, month=cal.prev, **extra) }}">&laquo; Prev</a>
+  <h5 class="m-0">{{ cal.title }}</h5>
+  <a class="btn btn-outline-secondary btn-sm" href="{{ url_for(endpoint, month=cal.next, **extra) }}">Next &raquo;</a>
+</div>
+<table class="table table-bordered cal bg-white mb-3">
+  <thead class="table-light"><tr>{% for d in ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'] %}<th class="text-center">{{ d }}</th>{% endfor %}</tr></thead>
+  <tbody>
+  {% for week in cal.weeks %}<tr>
+    {% for cell in week %}
+      {% if cell %}
+        <td class="{{ cell.info.status if cell.info and cell.info.status else ('free' if cell.info else '') }}{% if cell.date == selected %} selected{% endif %}{% if cell.is_today %} today{% endif %}">
+          <a href="{{ url_for(endpoint, month=cal.month, date=cell.date, **extra) }}">
+            <span class="day">{{ cell.day }}</span>
+            {% if cell.info %}<div class="small text-muted">{{ cell.info.free if cell.info.free is defined else cell.info.total }} {{ 'free' if cell.info.free is defined else 'slots' }}</div>{% endif %}
+          </a>
+        </td>
+      {% else %}<td class="bg-light"></td>{% endif %}
+    {% endfor %}
+  </tr>{% endfor %}
+  </tbody>
+</table>
+{% endmacro %}
+
+{% macro status_badge(booking, now) %}
+  {% if booking.status == 'cancelled' %}<span class="badge text-bg-danger">cancelled</span>
+  {% elif booking.status == 'completed' %}<span class="badge text-bg-secondary">completed</span>
+  {% elif booking.slot.start_at > now %}<span class="badge text-bg-success">confirmed</span>
+  {% else %}<span class="badge text-bg-secondary">past</span>{% endif %}
+{% endmacro %}
+
+{% macro pager(page, endpoint, extra={}) %}
+{% if page.pages > 1 %}
+<nav><ul class="pagination">
+  {% for p in range(1, page.pages + 1) %}
+    <li class="page-item {{ 'active' if p == page.page }}"><a class="page-link" href="{{ url_for(endpoint, page=p, **extra) }}">{{ p }}</a></li>
+  {% endfor %}
+</ul></nav>
+{% endif %}
+{% endmacro %}

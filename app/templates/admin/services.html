@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+{% block title %}Services{% endblock %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h3 class="m-0">Services</h3><a class="btn btn-primary" href="{{ url_for('admin.service_edit') }}">Add service</a>
+</div>
+<table class="table table-striped bg-white align-middle">
+  <thead><tr><th>Name</th><th>Duration</th><th>Zoom</th><th>Status</th><th></th></tr></thead>
+  <tbody>{% for s in services %}
+    <tr><td>{{ s.name }}<div class="small text-muted">{{ s.description }}</div></td><td>{{ s.duration_minutes }} min</td>
+      <td>{{ 'yes' if s.use_zoom else '—' }}</td>
+      <td><span class="badge text-bg-{{ 'success' if s.active else 'secondary' }}">{{ 'active' if s.active else 'inactive' }}</span></td>
+      <td class="text-end"><a class="btn btn-sm btn-outline-primary" href="{{ url_for('admin.service_edit', service_id=s.id) }}">Edit</a></td></tr>
+  {% endfor %}</tbody>
+</table>
+{% endblock %}

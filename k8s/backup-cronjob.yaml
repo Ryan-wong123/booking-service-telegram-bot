@@ -1,0 +1,46 @@
+# Nightly logical backup of the in-cluster Postgres to a PVC. Copy it off the node
+# (e.g. `aws s3 cp`) or use RDS automated backups instead.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: pg-backups
+  namespace: booking
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: 5Gi
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: pg-backup
+  namespace: booking
+spec:
+  schedule: "30 18 * * *"   # 02:30 Singapore time
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 2
+  failedJobsHistoryLimit: 2
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          restartPolicy: OnFailure
+          containers:
+            - name: dump
+              image: postgres:16-alpine
+              command: ["/bin/sh", "-c"]
+              args:
+                - >
+                  pg_dump -h postgres -U booking -d booking -Fc
+                  -f /backups/booking-$(date +%Y%m%d-%H%M%S).dump &&
+                  find /backups -name 'booking-*.dump' -mtime +14 -delete
+              env:
+                - name: PGPASSWORD
+                  valueFrom:
+                    secretKeyRef: { name: booking-secrets, key: POSTGRES_PASSWORD }
+              volumeMounts:
+                - { name: backups, mountPath: /backups }
+          volumes:
+            - name: backups
+              persistentVolumeClaim: { claimName: pg-backups }

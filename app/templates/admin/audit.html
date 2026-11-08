@@ -1,0 +1,13 @@
+{% extends "base.html" %}
+{% from "_macros.html" import pager %}
+{% block title %}Audit log{% endblock %}
+{% block content %}
+<h3 class="mb-3">Audit log</h3>
+<table class="table table-sm table-striped bg-white">
+  <thead><tr><th>Time</th><th>Actor</th><th>Action</th><th>Detail</th></tr></thead>
+  <tbody>{% for a in page.items %}
+    <tr><td>{{ a.created_at|dt }}</td><td>{{ a.actor.email if a.actor else '—' }}</td><td><code>{{ a.action }}</code></td><td>{{ a.detail }}</td></tr>
+  {% endfor %}</tbody>
+</table>
+{{ pager(page, 'admin.audit_log') }}
+{% endblock %}

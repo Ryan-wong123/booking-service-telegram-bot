@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% from "_macros.html" import pager %}
+{% block title %}Users{% endblock %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h3 class="m-0">Users</h3>
+  <a class="btn btn-primary" href="{{ url_for('admin.user_new') }}">Add user</a>
+</div>
+<div class="mb-3">
+  <a class="btn btn-sm {{ 'btn-dark' if not role else 'btn-outline-dark' }}" href="{{ url_for('admin.users') }}">All</a>
+  {% for r in roles %}<a class="btn btn-sm {{ 'btn-dark' if role == r else 'btn-outline-dark' }}" href="{{ url_for('admin.users', role=r) }}">{{ r }}</a>{% endfor %}
+</div>
+<table class="table table-striped bg-white align-middle">
+  <thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Status</th><th></th></tr></thead>
+  <tbody>
+  {% for u in page.items %}
+    <tr>
+      <td>{{ u.name }}</td><td>{{ u.email }}</td><td><span class="badge text-bg-secondary">{{ u.role }}</span></td>
+      <td>{% if not u.active %}<span class="badge text-bg-danger">inactive</span>{% elif u.is_locked() %}<span class="badge text-bg-warning">locked</span>{% else %}<span class="badge text-bg-success">active</span>{% endif %}</td>
+      <td class="text-end">
+        {% if u.is_locked() %}<form method="post" action="{{ url_for('admin.user_unlock', user_id=u.id) }}" class="d-inline">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="btn btn-sm btn-outline-warning">Unlock</button></form>{% endif %}
+        <a class="btn btn-sm btn-outline-primary" href="{{ url_for('admin.user_edit', user_id=u.id) }}">Edit</a>
+      </td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{{ pager(page, 'admin.users', {'role': role} if role else {}) }}
+{% endblock %}

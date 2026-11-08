@@ -1,0 +1,33 @@
+# Creates tables, the default service and the first super admin. Idempotent.
+# Jobs are immutable: delete it before re-applying  (kubectl -n booking delete job booking-init-db)
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: booking-init-db
+  namespace: booking
+spec:
+  backoffLimit: 3
+  ttlSecondsAfterFinished: 600
+  template:
+    spec:
+      restartPolicy: OnFailure
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+      containers:
+        - name: init
+          image: booking-portal:latest   # overridden by kustomization.yaml `images:`
+          imagePullPolicy: IfNotPresent
+          command: ["flask", "--app", "wsgi", "init-db"]
+          envFrom:
+            - configMapRef: { name: booking-config }
+            - secretRef: { name: booking-secrets }
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }
+          volumeMounts:
+            - { name: tmp, mountPath: /tmp }
+      volumes:
+        - name: tmp
+          emptyDir: {}

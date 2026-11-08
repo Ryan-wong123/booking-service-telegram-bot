@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% block title %}Reschedule{% endblock %}
+{% block content %}
+<h3>Reschedule</h3>
+<p class="text-muted">Currently: <strong>{{ booking.slot.start_at|dt }}</strong> · {{ booking.slot.service.name }}. Pick a new time for the same service.</p>
+<div class="d-flex gap-2 mb-3">
+  <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('customer.reschedule', booking_id=booking.id, month=cal.prev) }}">&laquo; {{ cal.prev }}</a>
+  <span class="align-self-center fw-bold">{{ cal.title }}</span>
+  <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('customer.reschedule', booking_id=booking.id, month=cal.next) }}">{{ cal.next }} &raquo;</a>
+</div>
+{% for date_key, items in groups.items() %}
+  <h6>{{ items[0].start_at|dlong }}</h6>
+  <div class="mb-3 d-flex flex-wrap gap-2">
+  {% for s in items %}
+    <form method="post">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <input type="hidden" name="slot_id" value="{{ s.id }}">
+      <button class="btn btn-outline-primary btn-sm">{{ s.start_at|tm }} · {{ s.staff.name }}</button>
+    </form>
+  {% endfor %}
+  </div>
+{% else %}<div class="alert alert-secondary">No free slots for this service in {{ cal.title }}.</div>{% endfor %}
+<a href="{{ url_for('customer.my_bookings') }}">Back to my bookings</a>
+{% endblock %}

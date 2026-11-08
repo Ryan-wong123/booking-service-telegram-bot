@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+{% block title %}Confirm booking{% endblock %}
+{% block content %}
+<div class="row justify-content-center"><div class="col-md-7 col-lg-5">
+<div class="card shadow-sm"><div class="card-body">
+  <h4>Confirm your booking</h4>
+  <dl class="row mb-3">
+    <dt class="col-4">Service</dt><dd class="col-8">{{ slot.service.name }} ({{ slot.service.duration_minutes }} min)</dd>
+    <dt class="col-4">When</dt><dd class="col-8">{{ slot.start_at|dt }} – {{ slot.end_at|tm }}</dd>
+    <dt class="col-4">With</dt><dd class="col-8">{{ slot.staff.name }}</dd>
+    {% if slot.service.use_zoom %}<dt class="col-4">Where</dt><dd class="col-8">Online (a Zoom link will be provided)</dd>{% endif %}
+  </dl>
+  <form method="post">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <div class="mb-3"><label class="form-label">Notes for your host (optional)</label>
+      <textarea class="form-control" name="notes" rows="3" maxlength="500"></textarea></div>
+    <button class="btn btn-success">Confirm booking</button>
+    <a class="btn btn-link" href="{{ url_for('customer.slots') }}">Back</a>
+  </form>
+</div></div></div></div>
+{% endblock %}

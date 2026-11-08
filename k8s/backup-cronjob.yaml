@@ -1,16 +1,6 @@
-# Nightly logical backup of the in-cluster Postgres to a PVC. Copy it off the node
-# (e.g. `aws s3 cp`) or use RDS automated backups instead.
-apiVersion: v1
-kind: PersistentVolumeClaim
-metadata:
-  name: pg-backups
-  namespace: booking
-spec:
-  accessModes: ["ReadWriteOnce"]
-  resources:
-    requests:
-      storage: 5Gi
----
+# Nightly pg_dump uploaded to S3 (verified with pg_restore -l before upload).
+# Auth: the EC2 instance role (no AWS keys in the cluster). Needs IMDSv2 hop limit 2 so pods can reach it
+# (see docs/DEPLOY_AWS_EC2.md). Retention is an S3 lifecycle rule, not this job.
 apiVersion: batch/v1
 kind: CronJob
 metadata:
@@ -20,27 +10,33 @@ spec:
   schedule: "30 18 * * *"   # 02:30 Singapore time
   concurrencyPolicy: Forbid
   successfulJobsHistoryLimit: 2
-  failedJobsHistoryLimit: 2
+  failedJobsHistoryLimit: 3
   jobTemplate:
     spec:
+      backoffLimit: 2
       template:
         spec:
           restartPolicy: OnFailure
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 10001
           containers:
-            - name: dump
-              image: postgres:16-alpine
-              command: ["/bin/sh", "-c"]
-              args:
-                - >
-                  pg_dump -h postgres -U booking -d booking -Fc
-                  -f /backups/booking-$(date +%Y%m%d-%H%M%S).dump &&
-                  find /backups -name 'booking-*.dump' -mtime +14 -delete
+            - name: backup
+              image: booking-backup:latest   # overridden by kustomization.yaml `images:`
+              imagePullPolicy: IfNotPresent
               env:
+                - { name: HOME, value: /tmp }
+                - { name: PGHOST, value: postgres }
                 - name: PGPASSWORD
                   valueFrom:
                     secretKeyRef: { name: booking-secrets, key: POSTGRES_PASSWORD }
+              envFrom:
+                - configMapRef: { name: booking-config }   # S3_BUCKET, S3_PREFIX, AWS_DEFAULT_REGION
+              securityContext:
+                allowPrivilegeEscalation: false
+                capabilities: { drop: ["ALL"] }
               volumeMounts:
-                - { name: backups, mountPath: /backups }
+                - { name: tmp, mountPath: /tmp }
           volumes:
-            - name: backups
-              persistentVolumeClaim: { claimName: pg-backups }
+            - name: tmp
+              emptyDir: {}

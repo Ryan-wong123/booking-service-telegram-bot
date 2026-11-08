@@ -8,7 +8,7 @@ from ..extensions import db
 from ..models import CANCELLED, COMPLETED, CONFIRMED, Booking, Service, Slot
 from ..security import audit
 from ..timeutils import utcnow
-from . import zoom
+from . import notifications, zoom
 
 
 class BookingError(Exception):
@@ -89,10 +89,14 @@ def book_slot(customer, slot_id: int, notes: str = ""):
         raise BookingError("Sorry, someone just took that slot. Please pick another.")
 
     booking = Booking(slot_id=slot.id, customer_id=customer.id, notes=notes.strip()[:500])
+    if notifications.needs_reminder_now(slot.start_at):
+        booking.reminder_sent_at = utcnow()  # booked inside the reminder window: the confirmation is enough
     db.session.add(booking)
     audit("booking.create", f"slot={slot.id} customer={customer.id}", customer)
     db.session.commit()
-    return booking, _attach_zoom(booking)
+    zoom_ok = _attach_zoom(booking)
+    notifications.booking_confirmed(booking)
+    return booking, zoom_ok
 
 
 def cancel_booking(booking: Booking, actor, reason: str = "") -> None:
@@ -112,6 +116,7 @@ def cancel_booking(booking: Booking, actor, reason: str = "") -> None:
     audit("booking.cancel", f"booking={booking.id} reason={reason.strip()[:100]}", actor)
     db.session.commit()
     zoom.delete_meeting(meeting_id)  # best effort, after the DB is safe
+    notifications.booking_cancelled(booking, actor)
 
 
 def reschedule_booking(booking: Booking, new_slot_id: int, actor):
@@ -130,14 +135,19 @@ def reschedule_booking(booking: Booking, new_slot_id: int, actor):
         raise BookingError("Sorry, someone just took that slot. Please pick another.")
 
     old_slot, old_meeting = booking.slot, booking.zoom_meeting_id
+    old_start, old_staff = old_slot.start_at, old_slot.staff
     old_slot.is_booked = False
     booking.slot_id = new_slot.id
     booking.zoom_meeting_id = booking.zoom_link = None
+    # New time -> the reminder is owed again unless the new slot is already inside the window.
+    booking.reminder_sent_at = utcnow() if notifications.needs_reminder_now(new_slot.start_at) else None
     audit("booking.reschedule", f"booking={booking.id} {old_slot.id}->{new_slot.id}", actor)
     db.session.commit()
     zoom.delete_meeting(old_meeting)
     db.session.refresh(booking)
-    return _attach_zoom(booking)
+    zoom_ok = _attach_zoom(booking)
+    notifications.booking_rescheduled(booking, old_start, old_staff)
+    return zoom_ok
 
 
 def complete_booking(booking: Booking, actor) -> None:

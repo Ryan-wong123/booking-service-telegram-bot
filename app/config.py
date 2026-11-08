@@ -33,6 +33,16 @@ def load_config() -> dict:
         "LOCKOUT_ATTEMPTS": int(os.environ.get("LOCKOUT_ATTEMPTS", "5")),
         "LOCKOUT_MINUTES": int(os.environ.get("LOCKOUT_MINUTES", "15")),
         "MIN_PASSWORD_LENGTH": int(os.environ.get("MIN_PASSWORD_LENGTH", "10")),
+        # Email (Amazon SES SMTP, or any SMTP). Disabled unless SMTP_HOST is set.
+        "SMTP_HOST": os.environ.get("SMTP_HOST"),
+        "SMTP_PORT": int(os.environ.get("SMTP_PORT", "587")),
+        "SMTP_USERNAME": os.environ.get("SMTP_USERNAME"),
+        "SMTP_PASSWORD": os.environ.get("SMTP_PASSWORD"),
+        "SMTP_STARTTLS": _bool("SMTP_STARTTLS", True),
+        "MAIL_FROM": os.environ.get("MAIL_FROM", "Booking Portal <no-reply@localhost>"),
+        "APP_BASE_URL": os.environ.get("APP_BASE_URL", "http://localhost:8000"),  # used in email links
+        "REMINDER_HOURS": int(os.environ.get("REMINDER_HOURS", "24")),
+        "RESET_TOKEN_MINUTES": int(os.environ.get("RESET_TOKEN_MINUTES", "60")),
         # Optional Zoom (Server-to-Server OAuth). Disabled unless all three are set.
         "ZOOM_ACCOUNT_ID": os.environ.get("ZOOM_ACCOUNT_ID"),
         "ZOOM_CLIENT_ID": os.environ.get("ZOOM_CLIENT_ID"),

@@ -11,3 +11,14 @@ data:
   TRUST_PROXY: "true"
   SESSION_COOKIE_SECURE: "true"   # set to "false" ONLY if you serve plain HTTP (not recommended)
   LOG_LEVEL: "INFO"
+  # --- links in emails (set to your real public URL) ---
+  APP_BASE_URL: "https://booking.example.com"
+  REMINDER_HOURS: "24"
+  # --- email via Amazon SES SMTP (username/password live in the secret) ---
+  MAIL_FROM: "Booking Portal <no-reply@example.com>"   # must be a verified SES identity
+  SMTP_HOST: "email-smtp.ap-southeast-1.amazonaws.com"  # empty string disables email
+  SMTP_PORT: "587"
+  # --- S3 backups ---
+  S3_BUCKET: "your-booking-backups"
+  S3_PREFIX: "booking"
+  AWS_DEFAULT_REGION: "ap-southeast-1"

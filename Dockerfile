@@ -10,6 +10,7 @@ COPY requirements.txt .
 RUN pip install -r requirements.txt
 
 COPY app ./app
+COPY migrations ./migrations
 COPY wsgi.py .
 
 # Run as an unprivileged user (UID matches the Kubernetes securityContext)

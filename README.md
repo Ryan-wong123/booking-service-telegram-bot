@@ -19,12 +19,21 @@ Telegram features have been removed.)
 - Security: hashed passwords, CSRF on every form, state changes only via POST, login lockout, open-redirect protection,
   security headers/CSP, ownership checks, no secrets in the repo, audit log.
 - Deactivating or demoting a staff member cancels their upcoming bookings; customers see the reason in their account.
+- **Email** (Amazon SES SMTP or any SMTP server): booking confirmations to customer and host, cancellation and
+  reschedule notices to the other party (with the reason), and a reminder `REMINDER_HOURS` (default 24) before the
+  appointment. Reminders run from a CronJob / compose service and are sent exactly once (retried if delivery fails).
+- **Password reset** by emailed single-use link (expires after `RESET_TOKEN_MINUTES`, throttled, no account
+  enumeration), plus change-password on the Account page.
+- **Database migrations** with Flask-Migrate/Alembic (`migrations/`); a test fails if the models and migrations drift.
+- **Backups** of PostgreSQL to S3 (verified before upload) with a restore script.
+- **CI** (GitHub Actions): lint, tests on SQLite and PostgreSQL, migration check, image build + smoke test, optional ECR publish.
 - `/healthz` (liveness) and `/readyz` (database) endpoints; structured logs to stdout.
 
 ## Configuration (environment variables)
 See `.env.example`. Key ones: `SECRET_KEY` (**required** when `APP_ENV=production`), `DATABASE_URL`
 (PostgreSQL only; defaults to `postgresql://booking:booking@localhost:5432/booking`), `SUPERADMIN_EMAIL`/`SUPERADMIN_PASSWORD` (first-run bootstrap),
-`APP_TIMEZONE`, `MAX_ACTIVE_BOOKINGS`, `ALLOW_REGISTRATION`, `MIN_PASSWORD_LENGTH`, `ZOOM_*` (optional).
+`APP_TIMEZONE`, `MAX_ACTIVE_BOOKINGS`, `ALLOW_REGISTRATION`, `MIN_PASSWORD_LENGTH`, `SMTP_*`/`MAIL_FROM`/`APP_BASE_URL`
+(email), `REMINDER_HOURS`, `ZOOM_*` (optional).
 
 ## Run locally
 ```bash
@@ -35,10 +44,23 @@ export POSTGRES_PASSWORD=booking
 docker compose up -d db
 export DATABASE_URL=postgresql://booking:booking@localhost:5432/booking
 export SUPERADMIN_EMAIL=admin@example.com SUPERADMIN_PASSWORD='a-long-password-here'
-flask --app wsgi init-db
+flask --app wsgi init-db          # applies migrations + seeds the first super admin
 flask --app wsgi run --debug
+flask --app wsgi send-reminders   # what the reminder job runs
 ```
 Create more users from the admin UI, or `flask --app wsgi create-user EMAIL "Name" staff`.
+
+## Database changes (migrations)
+```bash
+# after editing app/models.py:
+flask --app wsgi db migrate -m "describe the change"   # review the generated file in migrations/versions/
+flask --app wsgi db upgrade                            # apply it (init-db also does this)
+```
+Commit the new migration file with the model change.
+
+## Local email testing
+`docker compose --profile dev up` also starts Mailpit, a fake inbox at http://localhost:8025. Set `SMTP_HOST=mailpit`,
+`SMTP_PORT=1025`, `SMTP_STARTTLS=false` in `.env` to see every email the portal sends.
 
 ## Tests
 ```bash
@@ -68,8 +90,7 @@ Dockerfile, docker-compose.yml, wsgi.py
 ```
 
 ## Known limitations
-- **No reminders or notifications.** Telegram was the only channel; users now see status and cancellation reasons in
-  the portal only. Adding email (SMTP/Amazon SES) is the natural next step.
-- **No schema migrations yet.** `flask init-db` uses `create_all`, which creates missing tables but does not alter existing
-  ones. Add Flask-Migrate/Alembic before changing the schema of a live database.
-- No self-service password reset (a super admin resets passwords).
+- Email is plain text and in-app only for status; there is no SMS/push channel.
+- Amazon SES starts in *sandbox* mode (can only email verified addresses): request production access before launch.
+- A reminder goes out once per booking, `REMINDER_HOURS` before the start (the CronJob runs every 10 minutes).
+- Single-region, single-node by default (k3s on one EC2 instance). See the deploy guide for what that implies.

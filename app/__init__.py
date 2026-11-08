@@ -12,7 +12,9 @@ from sqlalchemy.exc import OperationalError
 from werkzeug.middleware.proxy_fix import ProxyFix
 
 from .config import load_config
-from .extensions import csrf, db, login_manager
+from flask_migrate import upgrade
+
+from .extensions import csrf, db, login_manager, migrate
 from .models import CUSTOMER, STAFF, SUPERADMIN, Service, User
 from .timeutils import to_local
 
@@ -38,6 +40,7 @@ def create_app(test_config: dict | None = None) -> Flask:
         app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
 
     db.init_app(app)
+    migrate.init_app(app, db, directory=os.path.join(os.path.dirname(app.root_path), "migrations"))
     csrf.init_app(app)
     login_manager.init_app(app)
     login_manager.login_view = "auth.login"
@@ -130,7 +133,7 @@ def _register_errors(app: Flask) -> None:
 def _register_cli(app: Flask) -> None:
     @app.cli.command("init-db")
     def init_db():
-        """Create tables, a default service and (if configured) the first super admin. Idempotent."""
+        """Apply database migrations, seed a default service and (if configured) the first super admin. Idempotent."""
         for attempt in range(30):  # wait for the database (e.g. Postgres still starting)
             try:
                 db.session.execute(text("SELECT 1"))
@@ -141,7 +144,7 @@ def _register_cli(app: Flask) -> None:
         else:
             raise click.ClickException("Database is not reachable")
 
-        db.create_all()
+        upgrade()  # runs Alembic migrations (creates the schema on a fresh database)
         if not Service.query.first():
             db.session.add(Service(name="General", description="General appointment", duration_minutes=30))
         email, password = app.config["SUPERADMIN_EMAIL"], app.config["SUPERADMIN_PASSWORD"]
@@ -150,6 +153,14 @@ def _register_cli(app: Flask) -> None:
             click.echo(f"Created super admin {email}")
         db.session.commit()
         click.echo("Database ready.")
+
+    @app.cli.command("send-reminders")
+    def send_reminders():
+        """Email reminders for bookings starting within REMINDER_HOURS. Run every few minutes (cron)."""
+        from .services import notifications
+
+        count = notifications.send_due_reminders()
+        click.echo(f"Sent {count} reminder(s).")
 
     @app.cli.command("create-user")
     @click.argument("email")

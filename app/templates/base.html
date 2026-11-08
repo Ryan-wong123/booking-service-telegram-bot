@@ -37,6 +37,7 @@
           <li class="nav-item"><a class="nav-link" href="{{ url_for('admin.audit_log') }}">Audit log</a></li>
         {% endif %}
       </ul>
+      <a class="nav-link text-white-50 me-2" href="{{ url_for('auth.account') }}">Account</a>
       <span class="navbar-text me-3">{{ current_user.name }} <span class="badge text-bg-secondary">{{ current_user.role }}</span></span>
       <form method="post" action="{{ url_for('auth.logout') }}">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">

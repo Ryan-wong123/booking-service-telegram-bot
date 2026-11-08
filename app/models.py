@@ -26,6 +26,7 @@ class User(UserMixin, db.Model):
     active = db.Column(db.Boolean, nullable=False, default=True)
     failed_logins = db.Column(db.Integer, nullable=False, default=0)
     locked_until = db.Column(db.DateTime, nullable=True)
+    reset_requested_at = db.Column(db.DateTime, nullable=True)  # throttles password-reset emails
     created_at = db.Column(db.DateTime, nullable=False, default=utcnow)
 
     @property
@@ -111,6 +112,7 @@ class Booking(db.Model):
     cancelled_by_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=True)
     cancel_reason = db.Column(db.String(300), nullable=True)
     cancelled_at = db.Column(db.DateTime, nullable=True)
+    reminder_sent_at = db.Column(db.DateTime, nullable=True)
     created_at = db.Column(db.DateTime, nullable=False, default=utcnow)
 
     slot = db.relationship("Slot", back_populates="bookings")

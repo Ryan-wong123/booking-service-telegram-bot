@@ -1,0 +1,43 @@
+# Emails a reminder for bookings starting within REMINDER_HOURS. Idempotent: a booking is marked
+# once its reminder is delivered, and failed sends are retried on the next run.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: booking-reminders
+  namespace: booking
+spec:
+  schedule: "*/10 * * * *"
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 300
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      activeDeadlineSeconds: 240
+      template:
+        spec:
+          restartPolicy: Never
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 10001
+          containers:
+            - name: reminders
+              image: booking-portal:latest   # overridden by kustomization.yaml `images:`
+              imagePullPolicy: IfNotPresent
+              command: ["flask", "--app", "wsgi", "send-reminders"]
+              envFrom:
+                - configMapRef: { name: booking-config }
+                - secretRef: { name: booking-secrets }
+              resources:
+                requests: { cpu: 50m, memory: 128Mi }
+                limits: { memory: 256Mi }
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities: { drop: ["ALL"] }
+              volumeMounts:
+                - { name: tmp, mountPath: /tmp }
+          volumes:
+            - name: tmp
+              emptyDir: {}

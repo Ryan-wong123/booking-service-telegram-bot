@@ -9,9 +9,13 @@ resources:
   - service.yaml
   - ingress.yaml
   - hpa.yaml
+  - reminders-cronjob.yaml
   - backup-cronjob.yaml
   # init-job.yaml is applied separately, after the secret exists (see docs).
 images:
   - name: booking-portal
     newName: booking-portal
+    newTag: "1.0.0"
+  - name: booking-backup
+    newName: booking-backup
     newTag: "1.0.0"

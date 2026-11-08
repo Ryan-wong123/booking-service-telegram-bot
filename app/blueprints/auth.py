@@ -8,7 +8,8 @@ from werkzeug.security import check_password_hash, generate_password_hash
 from .. import role_home
 from ..extensions import db
 from ..models import CUSTOMER, User
-from ..security import audit, is_safe_next
+from ..security import audit, is_safe_next, load_reset_token, make_reset_token
+from ..services import notifications
 from ..timeutils import utcnow
 
 bp = Blueprint("auth", __name__)
@@ -111,3 +112,70 @@ def register():
         flash("Welcome! Your account has been created.", "success")
         return redirect(role_home(user))
     return render_template("auth/register.html")
+
+
+RESET_THROTTLE = timedelta(minutes=2)
+
+
+@bp.route("/forgot-password", methods=["GET", "POST"])
+def forgot_password():
+    if request.method == "POST":
+        email = request.form.get("email", "").strip().lower()
+        user = User.query.filter_by(email=email).first()
+        now = utcnow()
+        if user and user.active and not (user.reset_requested_at and now - user.reset_requested_at < RESET_THROTTLE):
+            user.reset_requested_at = now
+            audit("auth.reset_requested", f"user={user.id}")
+            db.session.commit()
+            url = current_app.config["APP_BASE_URL"].rstrip("/") + url_for("auth.reset_password", token=make_reset_token(user))
+            notifications.password_reset(user, url, current_app.config["RESET_TOKEN_MINUTES"])
+        # Same answer whether or not the account exists (no account enumeration).
+        flash("If that email has an account, we've sent a link to reset the password.", "info")
+        return redirect(url_for("auth.login"))
+    return render_template("auth/forgot.html")
+
+
+@bp.route("/reset-password/<token>", methods=["GET", "POST"])
+def reset_password(token):
+    user = load_reset_token(token)
+    if not user:
+        flash("That reset link is invalid or has expired. Please request a new one.", "danger")
+        return redirect(url_for("auth.forgot_password"))
+    if request.method == "POST":
+        password = request.form.get("password", "")
+        error = validate_password(password)
+        if not error and password != request.form.get("confirm", ""):
+            error = "Passwords do not match."
+        if error:
+            flash(error, "danger")
+            return render_template("auth/reset.html", token=token), 400
+        user.set_password(password)
+        user.failed_logins, user.locked_until = 0, None
+        audit("auth.reset_done", f"user={user.id}", user)
+        db.session.commit()
+        flash("Your password has been changed. Please log in.", "success")
+        return redirect(url_for("auth.login"))
+    return render_template("auth/reset.html", token=token)
+
+
+@bp.route("/account", methods=["GET", "POST"])
+@login_required
+def account():
+    if request.method == "POST":
+        new = request.form.get("password", "")
+        error = None
+        if not current_user.check_password(request.form.get("current", "")):
+            error = "Your current password is incorrect."
+        elif new != request.form.get("confirm", ""):
+            error = "New passwords do not match."
+        else:
+            error = validate_password(new)
+        if error:
+            flash(error, "danger")
+            return render_template("auth/account.html"), 400
+        current_user.set_password(new)
+        audit("auth.password_change", f"user={current_user.id}", current_user)
+        db.session.commit()
+        flash("Password updated.", "success")
+        return redirect(url_for("auth.account"))
+    return render_template("auth/account.html")

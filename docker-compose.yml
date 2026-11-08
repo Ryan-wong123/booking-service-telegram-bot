@@ -1,4 +1,9 @@
 # Local / single-host run:  cp .env.example .env && docker compose up --build
+x-app-env: &app-env
+  env_file: .env
+  environment:
+    DATABASE_URL: postgresql://booking:${POSTGRES_PASSWORD}@db:5432/booking
+
 services:
   db:
     image: postgres:16-alpine
@@ -18,12 +23,10 @@ services:
       timeout: 3s
       retries: 10
 
-  init:
+  init:                       # applies migrations, seeds the default service + first super admin
     build: .
     command: ["flask", "init-db"]
-    env_file: .env
-    environment:
-      DATABASE_URL: postgresql://booking:${POSTGRES_PASSWORD}@db:5432/booking
+    <<: *app-env
     depends_on:
       db:
         condition: service_healthy
@@ -31,15 +34,28 @@ services:
 
   web:
     build: .
-    env_file: .env
-    environment:
-      DATABASE_URL: postgresql://booking:${POSTGRES_PASSWORD}@db:5432/booking
+    <<: *app-env
     ports:
       - "8000:8000"
     depends_on:
       init:
         condition: service_completed_successfully
     restart: unless-stopped
+
+  reminders:                  # emails appointment reminders; safe to run repeatedly
+    build: .
+    command: ["sh", "-c", "while true; do flask send-reminders; sleep 300; done"]
+    <<: *app-env
+    depends_on:
+      init:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+  mailpit:                    # local fake SMTP inbox, only with: docker compose --profile dev up
+    image: axllent/mailpit
+    profiles: ["dev"]
+    ports:
+      - "127.0.0.1:8025:8025"
 
 volumes:
   pgdata:

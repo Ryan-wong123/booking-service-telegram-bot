@@ -76,6 +76,7 @@ statically (e.g. YAML parse) and not run.
 | How it is built, data model, routes, deployment | [Architecture.md](Architecture.md) |
 | How to deploy to AWS EC2 + k3s | [DEPLOY_AWS_EC2.md](DEPLOY_AWS_EC2.md) |
 | How to run and test locally | `README.md` |
+| Entry point Claude Code loads automatically | `CLAUDE.md` (points here) |
 | Booking rules | `app/services/booking.py` |
 | Emails and reminders | `app/services/notifications.py`, `app/services/email.py` |
 | Schema | `app/models.py`, `migrations/versions/` |

@@ -52,6 +52,7 @@ tests/                 pytest suite
 backup/                backup.sh / restore.sh + Dockerfile for the S3 backup job image
 k8s/                   Kubernetes manifests (kustomize)
 docs/                  PRD.md, Architecture.md, Agents.md, DEPLOY_AWS_EC2.md
+CLAUDE.md              Entry point for Claude Code; points to docs/Agents.md
 Dockerfile, docker-compose.yml, wsgi.py, requirements*.txt, pytest.ini, .github/workflows/ci.yml
 ```
 

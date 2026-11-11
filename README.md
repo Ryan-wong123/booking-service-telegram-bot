@@ -76,6 +76,11 @@ PostgreSQL runs in its own container with data on the named volume `booking_pgda
 rebuilds (`docker compose down -v` deletes it). The app is at http://localhost:8000 (`init` runs once to create tables and the super admin).
 Over plain HTTP set `SESSION_COOKIE_SECURE=false`, otherwise browsers drop the login cookie.
 
+## Documentation
+- [docs/PRD.md](docs/PRD.md) — product requirements (roles, rules, configuration)
+- [docs/Architecture.md](docs/Architecture.md) — structure, data model, routes, deployment
+- [docs/Agents.md](docs/Agents.md) — rules for AI agents and contributors (**PRD and Architecture must be updated with every change**)
+
 ## Deploy to AWS EC2 with Docker + Kubernetes
 See **[docs/DEPLOY_AWS_EC2.md](docs/DEPLOY_AWS_EC2.md)** (single EC2 node running k3s; manifests in `k8s/`).
 

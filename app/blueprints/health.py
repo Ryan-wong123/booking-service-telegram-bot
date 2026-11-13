@@ -1,4 +1,6 @@
-from flask import Blueprint, jsonify
+import os
+
+from flask import Blueprint, current_app, jsonify
 from sqlalchemy import text
 
 from ..extensions import db
@@ -8,7 +10,9 @@ bp = Blueprint("health", __name__)
 
 @bp.get("/healthz")
 def healthz():
-    """Liveness: the process is up."""
+    """Liveness + load-balancer signal. Returns 503 while the instance is being drained for a deploy."""
+    if os.path.exists(current_app.config["DRAIN_FILE"]):
+        return jsonify(status="draining"), 503
     return jsonify(status="ok")
 
 

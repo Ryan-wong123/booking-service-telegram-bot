@@ -13,14 +13,14 @@ manages people, services and oversight. It replaces an earlier Telegram bot; the
 - Let staff publish their availability and manage who has booked them.
 - Give a super admin control over users, services and an audit trail.
 - Never double-book a slot; never lose a booking to a third-party outage (Zoom, email).
-- Run cheaply (~$20-30/month) on a single AWS EC2 instance with Docker Compose and PostgreSQL, while meeting a **99% availability** target (about 7 hours of downtime per month).
+- Run cheaply (~$20-30/month) on a single AWS EC2 instance with Docker Compose and PostgreSQL, with **no downtime for deployments** and a **99% availability** target (about 7 hours of downtime per month) for unplanned failures.
 
 **Non-goals (current scope)**
 - Payments, invoices or deposits.
 - SMS / push notifications (email only).
 - Recurring/series appointments; waiting lists; group bookings.
 - Multi-tenant / multi-organisation support; multi-language UI.
-- High availability beyond 99% (multi-AZ, load balancer, Kubernetes); see limitations for the upgrade path.
+- Surviving an instance or Availability-Zone failure without interruption (multi-AZ, load balancer, Kubernetes); see limitations for the upgrade path.
 - Calendar sync (Google/Outlook/ICS).
 
 ## 2. Users and roles
@@ -96,7 +96,7 @@ manages people, services and oversight. It replaces an earlier Telegram bot; the
 |---|---|
 | **Security** | CSRF token on every form; all state changes are POST; hashed passwords; login lockout; same-site relative redirects only (`next`); security headers incl. CSP, frame denial; secure, HttpOnly, SameSite cookies (Secure in production); `SECRET_KEY` mandatory in production; no secrets in the repository; ownership checks on all customer/staff resources; role checks on every protected route. |
 | **Data integrity** | Atomic slot claim; foreign keys; history preserved via soft-delete; migrations are the only way to change the schema. |
-| **Availability** | Target **99%** (≈7 h/month). Single EC2 instance with: CloudWatch auto-recovery, `restart: unless-stopped` containers with Docker enabled at boot, daily EBS snapshots, nightly verified S3 backup, an external uptime monitor on `/readyz`, log rotation and swap to avoid disk/memory exhaustion. Stateless web tier (sessions in signed cookies). `/healthz` (liveness) and `/readyz` (checks the database). A deploy or reboot causes a short outage (about a minute); an instance failure is recovered, not failed over. |
+| **Availability** | Target **99%** (≈7 h/month). Single EC2 instance with: CloudWatch auto-recovery, `restart: unless-stopped` containers with Docker enabled at boot, daily EBS snapshots, nightly verified S3 backup, an external uptime monitor on `/readyz`, log rotation and swap to avoid disk/memory exhaustion. Stateless web tier (sessions in signed cookies). `/healthz` (liveness) and `/readyz` (checks the database). **Deploys cause no downtime**: two app replicas behind the proxy are drained and replaced one at a time, and migrations must be backward compatible with the previous release (expand, then contract). An instance failure or OS reboot still causes a short outage (a few minutes): it is recovered, not failed over. |
 | **Recoverability** | Nightly verified PostgreSQL dump to S3 (30-day retention) plus daily EBS snapshots (7 kept); documented restore. |
 | **Observability** | Structured logs to stdout; audit log in the database. |
 | **Performance** | Month-scoped slot queries, indexes on slot start/staff and booking foreign keys, paginated admin lists. Target scale: hundreds of users, thousands of slots. |
@@ -123,6 +123,7 @@ manages people, services and oversight. It replaces an earlier Telegram bot; the
 | `ZOOM_ACCOUNT_ID` `ZOOM_CLIENT_ID` `ZOOM_CLIENT_SECRET` | — | Optional Zoom (Server-to-Server OAuth) |
 | `SUPERADMIN_EMAIL` `SUPERADMIN_PASSWORD` `SUPERADMIN_NAME` | — | First-run super admin (`init-db`, only if none exists) |
 | `LOG_LEVEL` | `INFO` | Logging |
+| `DRAIN_FILE` | `/tmp/draining` | While this file exists `/healthz` returns 503 (used by `deploy/deploy.sh` to drain a replica) |
 | Production Compose: `DOMAIN` `ACME_EMAIL` | — | Public hostname and Let's Encrypt contact for automatic HTTPS (Caddy) |
 | Backup job: `S3_BUCKET` `S3_PREFIX` `AWS_DEFAULT_REGION` | — / `booking` / — | Nightly backup |
 
@@ -133,11 +134,12 @@ manages people, services and oversight. It replaces an earlier Telegram bot; the
 - The test suite (see Architecture §9) passes on SQLite and PostgreSQL, and migrations match the models.
 - A fresh EC2 instance can be brought to a working HTTPS deployment by following `docs/DEPLOY_AWS_EC2.md`.
 - Measured availability stays at or above 99% per month as reported by the external uptime monitor.
+- Deploying a new version produces zero failed requests (checked in CI by sending continuous traffic during `deploy/deploy.sh`).
 
 ## 7. Known limitations and future work
 - Email only, plain text; Amazon SES starts in sandbox mode and needs production access.
 - One reminder per booking; no per-user notification preferences.
-- Single instance by design: not highly available. Deploys and reboots cause a short outage. For 99.9%+ the upgrade path is RDS Multi-AZ plus two app nodes behind a load balancer in two Availability Zones (roughly double the cost).
+- Single instance by design: deploys are zero-downtime, but an instance failure, an OS reboot (kernel updates) or a PostgreSQL restart/upgrade still causes a short outage. For surviving those the upgrade path is RDS Multi-AZ plus two app nodes behind a load balancer in two Availability Zones (roughly double the cost).
 - Password reset needs working email; otherwise a super admin resets passwords.
 - No rate limiting beyond account lockout and reset throttling (add an ingress/WAF limit for public exposure).
 - Deployment is manual (`git pull` + `docker compose up -d --build` on the server); CI builds and tests but does not deploy.

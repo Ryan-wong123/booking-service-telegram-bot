@@ -12,10 +12,11 @@ instance's disk). Email goes out through SMTP (Amazon SES); optional Zoom meetin
 ```mermaid
 flowchart LR
   U[Browser] -->|HTTPS 443| C[Caddy: automatic TLS]
-  C --> W[web: gunicorn + Flask]
-  W --> PG[(PostgreSQL on EBS volume)]
-  W -.->|SMTP 587| SES[Amazon SES]
-  W -.->|REST| Z[Zoom API]
+  C -->|round robin + health checks| W1[web1: gunicorn + Flask]
+  C -->|round robin + health checks| W2[web2: gunicorn + Flask]
+  W1 & W2 --> PG[(PostgreSQL on EBS volume)]
+  W1 & W2 -.->|SMTP 587| SES[Amazon SES]
+  W1 & W2 -.->|REST| Z[Zoom API]
   R[reminders loop: send-reminders every 5 min] --> PG
   R -.-> SES
   BK[backup: host cron, nightly] --> PG
@@ -42,7 +43,7 @@ app/
     customer.py        slots browsing, book, my-bookings, cancel, reschedule
     staff.py           schedule dashboard, create/delete slots, cancel/complete bookings
     admin.py           users, services, all bookings, audit log
-    health.py          /healthz, /readyz
+    health.py          /healthz (liveness; 503 while draining), /readyz (DB)
   services/
     booking.py         ALL booking business rules (atomic claim, limits, overlap, cancel, reschedule, slots)
     notifications.py   every email the portal sends + due-reminder sweep
@@ -52,7 +53,7 @@ app/
 migrations/            Alembic migrations (Flask-Migrate); versions/ holds the schema history
 tests/                 pytest suite
 backup/                backup.sh / restore.sh + Dockerfile for the S3 backup job image
-deploy/                Caddyfile (production reverse proxy / HTTPS)
+deploy/                caddy/Caddyfile (HTTPS + load balancer) and deploy.sh (zero-downtime rolling deploy)
 docs/                  PRD.md, Architecture.md, Agents.md, DEPLOY_AWS_EC2.md
 CLAUDE.md              Entry point for Claude Code; points to docs/Agents.md
 Dockerfile, docker-compose.yml (local), docker-compose.prod.yml (EC2), wsgi.py, requirements*.txt, pytest.ini, .github/workflows/ci.yml
@@ -127,7 +128,7 @@ Conventions: all datetimes are **naive UTC**; convert only at the edges (`timeut
 | GET | `/admin/services`; GET/POST `/admin/services/new`, `/admin/services/<id>` | superadmin | Service management |
 | GET | `/admin/bookings`; GET/POST `/admin/bookings/<id>/cancel` | superadmin | All bookings |
 | GET | `/admin/audit` | superadmin | Audit log |
-| GET | `/healthz`, `/readyz` | public | Liveness, readiness (DB) |
+| GET | `/healthz`, `/readyz` | public | `/healthz`: liveness, and the load-balancer signal (503 while `DRAIN_FILE` exists); `/readyz`: readiness (DB), used by the uptime monitor |
 
 Authorization: `roles_required(...)` on every protected route; customer/staff resources are additionally scoped to the
 owner (a non-owner gets 404, not 403). All POSTs require a CSRF token.
@@ -149,8 +150,8 @@ owner (a non-owner gets 404, not 403). All POSTs require a CSRF token.
   (one-shot), `web` (port 8000), `reminders` (loop), `mailpit` (profile `dev`).
 - **Production:** `docker-compose.prod.yml` on one EC2 instance (`t3.small`, Ubuntu 24.04, gp3 root volume, Elastic IP):
   - `caddy` is the only published service (80/443); it obtains and renews Let's Encrypt certificates (kept in the `caddy_data`
-    volume) and proxies to `web`. Config: `deploy/Caddyfile`, driven by `DOMAIN` and `ACME_EMAIL`.
-  - `web` (gunicorn, internal only), `init` (runs `flask init-db`, i.e. migrations, on every `up`), `reminders` (loop every 5 min),
+    volume) and load-balances `web1` and `web2` (round robin, active health check on `/healthz` every 2 s, retry on the other replica if a connection is refused). Config: `deploy/caddy/Caddyfile` (mounted as a directory so `caddy reload` sees edits), driven by `DOMAIN` and `ACME_EMAIL`.
+  - `web1` and `web2` (identical gunicorn replicas, internal only, `WEB_CONCURRENCY=2` each, 35 s stop grace), `init` (runs `flask init-db`, i.e. migrations, on every `up`), `reminders` (loop every 5 min),
     `db` (PostgreSQL 16, internal only, data on the named volume `booking_pgdata` which lives on the instance's EBS volume).
   - `backup` (profile `tools`) runs `backup/backup.sh`: `pg_dump` → verified with `pg_restore -l` → uploaded to S3 using the EC2
     instance role. It is started by host cron at 02:30 SGT (18:30 UTC): `docker compose ... run --rm backup`. `backup/restore.sh` restores.
@@ -158,8 +159,13 @@ owner (a non-owner gets 404, not 403). All POSTs require a CSRF token.
 - **Availability protections (99% target):** CloudWatch alarm on `StatusCheckFailed_System` with the `ec2:recover` action; Data Lifecycle
   Manager daily EBS snapshots (7 kept); nightly S3 dumps (30-day lifecycle); external uptime monitor on `/readyz`; 1 GiB swap.
   The single instance means a short outage per deploy/reboot and recovery (not failover) on instance failure.
-- **Update flow:** `git pull` → `docker compose -f docker-compose.prod.yml build` → `up -d` (init applies migrations first, then
-  `web` restarts). Migrations must stay backward compatible with the previous release. Details: [DEPLOY_AWS_EC2.md](DEPLOY_AWS_EC2.md).
+- **Zero-downtime deploy (`deploy/deploy.sh`):** build the image (site untouched) → start `db` and run migrations (`init`) → for each of `web1`,
+  `web2`: *drain* (create `/tmp/draining`, so `/healthz` returns 503 and Caddy stops routing to it, in-flight requests finish) → replace
+  the container and wait until healthy → pause so Caddy re-adds it → next replica → recreate `reminders` → `caddy reload` (graceful).
+  At least one healthy replica serves at all times. Because the old code keeps running while migrations apply, every migration must be
+  **backward compatible (expand → deploy → contract)**: add columns/tables first, stop using old ones in a later release, drop them in a release after that;
+  never rename or drop in the same release. Details: [DEPLOY_AWS_EC2.md](DEPLOY_AWS_EC2.md).
+- **Not covered by zero-downtime:** instance failure/reboot (a few minutes; auto-recovery), kernel-update reboots, and PostgreSQL restarts or major upgrades.
 - **Upgrade path:** RDS for PostgreSQL (change `DATABASE_URL`, drop `db`), then two app nodes behind a load balancer in two AZs.
 
 ## 9. Testing and CI
@@ -170,7 +176,9 @@ owner (a non-owner gets 404, not 403). All POSTs require a CSRF token.
 - Default run uses a temporary SQLite file; set `TEST_DATABASE_URL` to run the same suite on PostgreSQL.
 - `.github/workflows/ci.yml`: lint (pyflakes) → tests on SQLite and PostgreSQL → `init-db` against PostgreSQL → build both
   images and smoke-test `/healthz` → validate `docker-compose.yml` and `docker-compose.prod.yml` (`docker compose config`).
-  CI does not deploy; deployment is manual on the server.
+  A separate `zero-downtime` job starts the production stack (`DOMAIN=localhost`, Caddy's internal CA), sends continuous requests through
+  Caddy while `deploy/deploy.sh` replaces both replicas, and fails if any request is not a 200. The workflow can also be started manually
+  (`workflow_dispatch`). CI does not deploy to AWS; deployment is manual on the server.
 
 ## 10. Operational notes and risks
 

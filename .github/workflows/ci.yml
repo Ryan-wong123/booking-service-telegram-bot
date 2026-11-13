@@ -5,6 +5,7 @@ on:
     branches: [main]
     tags: ["v*"]
   pull_request:
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -75,3 +76,44 @@ jobs:
           context: backup
           push: false
           tags: booking-backup:ci
+
+  # Proves the zero-downtime claim: bring up the production stack, send continuous traffic through Caddy,
+  # run deploy/deploy.sh (replaces both app replicas), and fail if any single request was not a 200.
+  zero-downtime:
+    needs: test
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure production .env (DOMAIN=localhost uses Caddy's internal CA, no Let's Encrypt)
+        run: |
+          cp .env.example .env
+          sed -i -e 's/^APP_ENV=.*/APP_ENV=production/' \
+                 -e 's/^SECRET_KEY=.*/SECRET_KEY=ci-secret-key-not-for-production/' \
+                 -e 's/^POSTGRES_PASSWORD=.*/POSTGRES_PASSWORD=ci-postgres-password/' \
+                 -e 's/^DOMAIN=.*/DOMAIN=localhost/' \
+                 -e 's/^ACME_EMAIL=.*/ACME_EMAIL=ci@example.com/' .env
+      - name: Start the production stack
+        run: |
+          docker compose -f docker-compose.prod.yml up -d --build
+          for i in $(seq 1 60); do curl -ksf https://localhost/readyz && break; sleep 2; done
+          curl -ksf https://localhost/readyz
+      - name: Deploy while sending continuous traffic
+        run: |
+          : > codes.txt
+          ( while true; do curl -ks -m 5 -o /dev/null -w '%{http_code}\n' https://localhost/login >> codes.txt || true; sleep 0.05; done ) &
+          LOOP=$!
+          sleep 3
+          ./deploy/deploy.sh
+          sleep 3
+          kill $LOOP || true
+          echo "Response codes during the deploy:"; sort codes.txt | uniq -c
+          total=$(wc -l < codes.txt); bad=$(grep -vc '^200$' codes.txt || true)
+          echo "requests=$total non-200=$bad"
+          [ "$total" -gt 150 ]   # the test really exercised the deploy
+          [ "$bad" -eq 0 ]       # zero failed requests
+      - name: Site still healthy afterwards
+        run: curl -ksf https://localhost/readyz
+      - name: Logs on failure
+        if: failure()
+        run: docker compose -f docker-compose.prod.yml logs --tail=100

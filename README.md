@@ -84,7 +84,8 @@ Over plain HTTP set `SESSION_COOKIE_SECURE=false`, otherwise browsers drop the l
 ## Deploy to AWS EC2 (Docker Compose, single instance)
 See **[docs/DEPLOY_AWS_EC2.md](docs/DEPLOY_AWS_EC2.md)**: one `t3.small` running `docker-compose.prod.yml` (Caddy for automatic HTTPS,
 the app, PostgreSQL on the instance disk), with EC2 auto-recovery, nightly S3 backups, EBS snapshots and an uptime monitor
-to protect a 99% availability target at roughly $20-30/month.
+to protect a 99% availability target at roughly $20-30/month. Deploys are **zero-downtime**: `./deploy/deploy.sh` drains and
+replaces two app replicas one at a time (migrations must be backward compatible).
 
 ## Layout
 ```
@@ -101,4 +102,4 @@ Dockerfile, docker-compose.yml (local), docker-compose.prod.yml (EC2), wsgi.py
 - Email is plain text and in-app only for status; there is no SMS/push channel.
 - Amazon SES starts in *sandbox* mode (can only email verified addresses): request production access before launch.
 - A reminder goes out once per booking, `REMINDER_HOURS` before the start (the reminder loop runs every 5 minutes).
-- Single instance by design (cost): a deploy or reboot causes a short outage and an instance failure is a recovery, not a failover. Meets ~99%, not 99.9%.
+- Single instance by design (cost): deploys are zero-downtime, but an instance failure, an OS reboot or a PostgreSQL restart still causes a short outage (recovered, not failed over). Meets ~99%, not 99.9%.

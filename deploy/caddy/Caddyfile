@@ -1,0 +1,21 @@
+# Caddy terminates HTTPS (automatic Let's Encrypt certificates) and load-balances two app replicas.
+# DOMAIN and ACME_EMAIL come from .env. Ports 80 and 443 must be open and DNS must point at this server.
+{
+	email {$ACME_EMAIL}
+}
+
+{$DOMAIN} {
+	encode gzip
+	reverse_proxy web1:8000 web2:8000 {
+		lb_policy round_robin
+		# If a replica refuses the connection (restarting), retry on the other one instead of failing the request.
+		lb_try_duration 5s
+		lb_try_interval 250ms
+		# Take a replica out of rotation as soon as /healthz fails (a draining replica returns 503).
+		health_uri /healthz
+		health_interval 2s
+		health_timeout 2s
+		health_status 2xx
+		fail_duration 10s
+	}
+}

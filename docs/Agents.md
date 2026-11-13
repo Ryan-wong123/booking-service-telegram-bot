@@ -14,7 +14,7 @@ change/commit.** A change is not finished until the docs match the code.
 | Models, columns, indexes, constants | **Architecture.md** §4 *and* add an Alembic migration |
 | Routes, blueprints, CLI commands | **Architecture.md** §6–§7 (and PRD.md if user-visible) |
 | Files/folders, layering, dependencies, design decisions | **Architecture.md** §2, §3, §5 |
-| Docker, compose (local and prod), Caddy, CI, backups, deployment steps | **Architecture.md** §8–§9 *and* `docs/DEPLOY_AWS_EC2.md` |
+| Docker, compose (local and prod), Caddy, `deploy/deploy.sh`, CI, backups, deployment steps | **Architecture.md** §8–§9 *and* `docs/DEPLOY_AWS_EC2.md` |
 | Tests added/removed in a way that changes coverage | **Architecture.md** §9 |
 
 If nothing in the table applies, say so in your summary ("docs: no update needed, because …"). Never leave the docs
@@ -31,7 +31,7 @@ longer exists — do not reintroduce Telegram code.
 
 1. **Business rules live in `app/services/booking.py`.** Blueprints stay thin (parse → authorise → call service → render).
 2. **Schema changes need a migration.** Edit `app/models.py`, run `flask db migrate -m "..."`, review the generated file, commit
-   it. `tests/test_migrations.py` fails if models and migrations drift. Keep migrations backward compatible with the previous release.
+   it. `tests/test_migrations.py` fails if models and migrations drift. **Migrations must be backward compatible** (expand → deploy → contract): deploys are zero-downtime, so old and new code run side by side while the migration applies. Add columns/tables first, stop using old ones in a later release, and drop them in a release after that; never rename or drop in the same release.
 3. **Preserve the invariants** (each has tests — keep them passing and add tests for new behaviour):
    - A slot can be claimed by only one customer (atomic conditional `UPDATE`; never "check then insert").
    - Cancel/reschedule/complete are scoped to the owner or the owning staff member; non-owners get 404.

@@ -9,6 +9,19 @@ def test_healthz_and_readyz(client):
     assert client.get("/readyz").status_code == 200
 
 
+def test_healthz_reports_draining(app, client, tmp_path):
+    """Deploys create DRAIN_FILE so the proxy stops sending traffic before the container is replaced."""
+    drain = tmp_path / "draining"
+    app.config["DRAIN_FILE"] = str(drain)
+    assert client.get("/healthz").status_code == 200
+    drain.write_text("")
+    resp = client.get("/healthz")
+    assert resp.status_code == 503 and resp.get_json()["status"] == "draining"
+    assert client.get("/readyz").status_code == 200  # uptime monitor must not alert during a deploy
+    drain.unlink()
+    assert client.get("/healthz").status_code == 200
+
+
 def test_login_redirects_by_role(client, superadmin, staff, customer):
     assert login(client, "root@example.com").headers["Location"].endswith("/admin/users")
     client.post("/logout")

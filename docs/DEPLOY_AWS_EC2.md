@@ -2,7 +2,7 @@
 
 Design: **one EC2 instance** running Docker Compose: Caddy (automatic HTTPS) → the Flask app (gunicorn) → PostgreSQL
 on the instance's EBS disk, plus a reminder loop. This is the cheapest setup that comfortably meets a **99% availability**
-target (about 7 hours of downtime a month allowed). Approximate cost: **~$20–30/month** (`t3.small`, 20–30 GiB gp3, public IPv4,
+target (about 7 hours of downtime a month allowed) for unplanned failures, and **zero downtime for deployments**. Approximate cost: **~$20–30/month** (`t3.small`, 20–30 GiB gp3, public IPv4,
 S3 pennies; prices vary by region, check the AWS Pricing Calculator).
 
 > Status: the Compose file is validated (`docker compose config`) and CI builds the images and smoke-tests the app, but the
@@ -13,9 +13,12 @@ How the 99% is protected (all three are required, see section 7):
 2. **Backups:** nightly verified `pg_dump` to S3, plus daily EBS snapshots.
 3. **Uptime monitor** on `/readyz` that emails you when the site is down.
 
-Limits to be aware of: one instance means a short outage (a minute or two) on every deploy and on reboots, and a real
-instance/AZ failure is a recovery, not a failover. For 99.9%+ you need a second Availability Zone (RDS Multi-AZ, two app
-nodes, a load balancer), which roughly doubles the cost.
+**Zero-downtime deploys:** two app replicas run behind Caddy; `deploy/deploy.sh` drains and replaces them one at a time, so users
+never see an error during an update. CI proves this on every push by sending continuous traffic during a deploy.
+
+What is **not** covered: one instance means an instance failure, an OS reboot (e.g. a kernel update) or a PostgreSQL restart still
+causes a short outage (a few minutes; it is recovered, not failed over). For that you need a second Availability Zone (RDS Multi-AZ,
+two app nodes, a load balancer), roughly $90-120/month.
 
 ## 1. Launch the instance
 - AMI Ubuntu 24.04 LTS, **`t3.small`** (2 vCPU / 2 GiB), 20–30 GiB **gp3** root volume.
@@ -31,6 +34,8 @@ nodes, a load balancer), which roughly doubles the cost.
 ```bash
 sudo apt-get update && sudo apt-get install -y docker.io docker-compose-v2 git
 sudo systemctl enable --now docker          # Docker (and the stack) must come back after a reboot/recovery
+# Keep containers running even while the Docker daemon itself is restarted (e.g. by an automatic package upgrade)
+echo '{"live-restore": true}' | sudo tee /etc/docker/daemon.json && sudo systemctl restart docker
 sudo usermod -aG docker "$USER"             # log out and back in afterwards
 # 1 GiB swap so a memory spike doesn't kill a container on a 2 GiB machine
 sudo fallocate -l 1G /swapfile && sudo chmod 600 /swapfile && sudo mkswap /swapfile && sudo swapon /swapfile
@@ -61,7 +66,7 @@ the ones in the old repository history are compromised and must be revoked.
 ## 4. Start it
 ```bash
 cd /opt/booking
-docker compose -f docker-compose.prod.yml up -d --build
+docker compose -f docker-compose.prod.yml up -d --build      # first start only; later updates use ./deploy/deploy.sh
 docker compose -f docker-compose.prod.yml ps
 docker compose -f docker-compose.prod.yml logs init      # "Created super admin ..." and "Database ready."
 docker compose -f docker-compose.prod.yml logs -f caddy   # certificate obtained for your domain
@@ -134,26 +139,35 @@ aws dlm create-lifecycle-policy --description "booking daily" --state ENABLED \
 UptimeRobot's free tier (5-minute checks) is enough. Route 53 health checks also work but are billed (small amount per check).
 Without this you will find out about outages from your users.
 
-## 8. Updating
+## 8. Updating (zero downtime)
 ```bash
 cd /opt/booking && git pull
-docker compose -f docker-compose.prod.yml build            # build first, so downtime is just the restart
-docker compose -f docker-compose.prod.yml up -d            # init applies migrations, then web restarts (about a minute)
-docker compose -f docker-compose.prod.yml ps
+./deploy/deploy.sh
 ```
-Migrations run before the new web container starts; keep each migration backward compatible with the previous release.
-Take a manual backup first for risky changes. CI (`.github/workflows/ci.yml`) tests every push/PR and builds the images, but
-deploying is these manual steps.
+The script builds the image while the site keeps running, applies migrations, then for each app replica in turn **drains** it
+(its `/healthz` returns 503 so Caddy stops sending traffic), replaces it, waits until it is healthy and lets Caddy put it back
+before touching the other. It takes about a minute and a half. Users see no errors.
+
+Rules that keep it zero-downtime:
+- **Migrations must be backward compatible** with the previous release, because old and new code run side by side while it applies.
+  Add columns/tables in one release, stop using the old ones in the next, and drop them in a later one. Never rename or drop in the same release.
+- Changing the Caddyfile or the Compose file is picked up by the script (`caddy reload` is graceful); recreating Caddy itself can drop
+  connections for a moment, which only happens if `docker-compose.prod.yml` changed Caddy's own definition.
+- To roll back: `git checkout <previous commit>` and run the script again (migrations are forward-only, which is why they must be compatible).
+- Take a manual backup first for risky changes.
+
+CI (`.github/workflows/ci.yml`) tests every push/PR, builds the images and runs the zero-downtime test, but it does not deploy to AWS;
+deploying is the two commands above.
 
 ## 9. Operations
 ```bash
-docker compose -f docker-compose.prod.yml logs -f web                  # app logs (rotated: 3 x 10 MB)
-docker compose -f docker-compose.prod.yml restart web
-docker compose -f docker-compose.prod.yml exec web flask create-user EMAIL "Name" staff
+docker compose -f docker-compose.prod.yml logs -f web1 web2            # app logs (rotated: 3 x 10 MB)
+docker compose -f docker-compose.prod.yml restart web1                 # restart one replica at a time to stay up
+docker compose -f docker-compose.prod.yml exec web1 flask create-user EMAIL "Name" staff
 docker compose -f docker-compose.prod.yml exec db psql -U booking -d booking
 df -h /; docker system df                                              # watch disk; prune old images occasionally
 ```
-- **Security updates:** `sudo apt-get update && sudo apt-get upgrade`, then reboot in a quiet period (the stack restarts itself). Consider `unattended-upgrades`.
+- **Security updates:** `sudo apt-get update && sudo apt-get upgrade`, then reboot in a quiet period (the stack restarts itself; a reboot is the one routine action that still causes a short outage, so schedule it. Ubuntu Pro's free personal tier offers kernel Livepatch to avoid most kernel reboots). Consider `unattended-upgrades`.
 - **Hardening:** keep SSH limited to your IP (or use AWS Systems Manager Session Manager instead), never expose 5432, keep `.env` at `chmod 600`.
 - **Costs:** the instance, its EBS volume, snapshots, the Elastic IP (public IPv4 is billed) and S3 are charged while they exist.
 - **Growing later:** move PostgreSQL to RDS (change `DATABASE_URL`, remove the `db` service), run two app nodes behind a load balancer across two AZs.

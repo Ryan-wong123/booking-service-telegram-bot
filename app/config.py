@@ -40,6 +40,8 @@ def load_config() -> dict:
         "SMTP_PASSWORD": os.environ.get("SMTP_PASSWORD"),
         "SMTP_STARTTLS": _bool("SMTP_STARTTLS", True),
         "MAIL_FROM": os.environ.get("MAIL_FROM", "Booking Portal <no-reply@localhost>"),
+        # While this file exists /healthz returns 503, so the proxy stops routing here (zero-downtime deploys).
+        "DRAIN_FILE": os.environ.get("DRAIN_FILE", "/tmp/draining"),
         "APP_BASE_URL": os.environ.get("APP_BASE_URL", "http://localhost:8000"),  # used in email links
         "REMINDER_HOURS": int(os.environ.get("REMINDER_HOURS", "24")),
         "RESET_TOKEN_MINUTES": int(os.environ.get("RESET_TOKEN_MINUTES", "60")),

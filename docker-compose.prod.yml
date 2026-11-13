@@ -1,10 +1,12 @@
-# Production on a single EC2 instance:
-#   docker compose -f docker-compose.prod.yml up -d --build
-# Caddy (HTTPS) -> web (gunicorn) -> db (PostgreSQL on the instance's disk). See docs/DEPLOY_AWS_EC2.md.
+# Production on a single EC2 instance, with zero-downtime deploys (see deploy/deploy.sh):
+#   first start:  docker compose -f docker-compose.prod.yml up -d --build
+#   later deploys: ./deploy/deploy.sh
+# Caddy (HTTPS, load balancer) -> web1 + web2 (gunicorn) -> db (PostgreSQL on the instance's disk).
 x-app-env: &app-env
   env_file: .env
   environment:
     DATABASE_URL: postgresql://booking:${POSTGRES_PASSWORD}@db:5432/booking
+    WEB_CONCURRENCY: "2"        # gunicorn workers per replica (2 replicas x 2 workers fits a 2 GiB instance)
 
 # Rotate container logs so they can never fill the disk.
 x-logging: &logging
@@ -13,6 +15,27 @@ x-logging: &logging
     options:
       max-size: "10m"
       max-file: "3"
+
+# One image for everything the app runs (built once, cached on the others).
+x-app-build: &app-build
+  build: .
+  image: booking-web:local
+
+x-web: &web
+  <<: [*app-build, *app-env, *logging]
+  expose:
+    - "8000"                    # reachable only from Caddy on the internal network
+  stop_grace_period: 35s        # lets gunicorn finish in-flight requests (graceful-timeout is 30s)
+  healthcheck:
+    test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/healthz', timeout=2).status == 200 else 1)"]
+    interval: 5s
+    timeout: 3s
+    retries: 3
+    start_period: 15s
+  depends_on:
+    init:
+      condition: service_completed_successfully
+  restart: unless-stopped
 
 services:
   caddy:
@@ -24,38 +47,35 @@ services:
       DOMAIN: ${DOMAIN:?set DOMAIN in .env}
       ACME_EMAIL: ${ACME_EMAIL:?set ACME_EMAIL in .env}
     volumes:
-      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
-      - caddy_data:/data        # certificates: keep, or Let's Encrypt rate limits can lock you out
+      - ./deploy/caddy:/etc/caddy:ro   # a directory (not a single file) so `caddy reload` sees edits after git pull
+      - caddy_data:/data               # certificates: keep, or Let's Encrypt rate limits can lock you out
       - caddy_config:/config
     depends_on:
-      web:
+      web1:
+        condition: service_healthy
+      web2:
         condition: service_healthy
     restart: unless-stopped
     <<: *logging
 
-  web:
-    build: .
-    <<: [*app-env, *logging]
-    expose:
-      - "8000"                  # reachable only from Caddy on the internal network
-    depends_on:
-      init:
-        condition: service_completed_successfully
-    restart: unless-stopped
+  web1:
+    <<: *web
 
-  init:                         # applies migrations and seeds the first super admin; runs on every `up`
-    build: .
+  web2:
+    <<: *web
+
+  init:                         # applies migrations and seeds the first super admin
+    <<: [*app-build, *app-env, *logging]
     command: ["flask", "init-db"]
-    <<: [*app-env, *logging]
     depends_on:
       db:
         condition: service_healthy
     restart: "no"
 
   reminders:                    # emails appointment reminders; idempotent
-    build: .
+    <<: [*app-build, *app-env, *logging]
     command: ["sh", "-c", "while true; do flask send-reminders; sleep 300; done"]
-    <<: [*app-env, *logging]
+    init: true                  # forwards SIGTERM so it stops promptly on redeploy
     depends_on:
       init:
         condition: service_completed_successfully

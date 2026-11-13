@@ -6,22 +6,24 @@
 ## 1. System overview
 
 A server-rendered Flask application (Jinja templates + Bootstrap from a CDN) backed by PostgreSQL. It is packaged as one
-Docker image and run on Kubernetes (k3s on a single AWS EC2 instance). Email goes out through SMTP (Amazon SES);
-optional Zoom meetings via the Zoom REST API; nightly backups go to S3.
+Docker image and run with Docker Compose on a single AWS EC2 instance (Caddy in front for HTTPS, PostgreSQL on the
+instance's disk). Email goes out through SMTP (Amazon SES); optional Zoom meetings via the Zoom REST API; nightly backups go to S3.
 
 ```mermaid
 flowchart LR
-  U[Browser] -->|HTTPS| I[Traefik ingress]
-  I --> W1[web pod 1: gunicorn + Flask]
-  I --> W2[web pod 2: gunicorn + Flask]
-  W1 & W2 --> PG[(PostgreSQL StatefulSet / RDS)]
-  W1 & W2 -.->|SMTP 587| SES[Amazon SES]
-  W1 & W2 -.->|REST| Z[Zoom API]
-  CR[CronJob: send-reminders every 10 min] --> PG
-  CR -.-> SES
-  BK[CronJob: pg-backup nightly] --> PG
+  U[Browser] -->|HTTPS 443| C[Caddy: automatic TLS]
+  C --> W[web: gunicorn + Flask]
+  W --> PG[(PostgreSQL on EBS volume)]
+  W -.->|SMTP 587| SES[Amazon SES]
+  W -.->|REST| Z[Zoom API]
+  R[reminders loop: send-reminders every 5 min] --> PG
+  R -.-> SES
+  BK[backup: host cron, nightly] --> PG
   BK -->|instance role| S3[(S3 bucket)]
-  INIT[Job: init-db] --> PG
+  INIT[init: migrations on every up] --> PG
+  EBS[(EBS snapshots, daily)] -.-> PG
+  CW[CloudWatch auto-recovery alarm] -.-> EC2[EC2 instance]
+  UP[External uptime monitor] -.->|/readyz| C
 ```
 
 ## 2. Repository layout
@@ -50,10 +52,10 @@ app/
 migrations/            Alembic migrations (Flask-Migrate); versions/ holds the schema history
 tests/                 pytest suite
 backup/                backup.sh / restore.sh + Dockerfile for the S3 backup job image
-k8s/                   Kubernetes manifests (kustomize)
+deploy/                Caddyfile (production reverse proxy / HTTPS)
 docs/                  PRD.md, Architecture.md, Agents.md, DEPLOY_AWS_EC2.md
 CLAUDE.md              Entry point for Claude Code; points to docs/Agents.md
-Dockerfile, docker-compose.yml, wsgi.py, requirements*.txt, pytest.ini, .github/workflows/ci.yml
+Dockerfile, docker-compose.yml (local), docker-compose.prod.yml (EC2), wsgi.py, requirements*.txt, pytest.ini, .github/workflows/ci.yml
 ```
 
 **Layering rule:** blueprints parse the request, check roles/ownership, call `services/*`, and render. Business rules
@@ -99,7 +101,7 @@ Conventions: all datetimes are **naive UTC**; convert only at the edges (`timeut
 4. **Side effects after commit, never fatal.** Zoom and email run after the database commit; every failure is
    logged and swallowed. A booking is never rolled back because Zoom or SMTP is down.
 5. **Emails.** Request handlers send in a background thread (non-blocking). The reminder sweep sends synchronously so
-   it only sets `reminder_sent_at` after a successful delivery; the sweep is idempotent and safe to run from a CronJob.
+   it only sets `reminder_sent_at` after a successful delivery; the sweep is idempotent and safe to run repeatedly from the reminder loop.
    In tests (`TESTING=True`) messages are captured in `app.extensions["outbox"]`.
 6. **Migrations are the schema authority.** `flask init-db` runs `upgrade()`; a test asserts that migrations produce
    exactly the schema in `models.py`. Never edit the schema without a migration.
@@ -143,16 +145,22 @@ owner (a non-owner gets 404, not 403). All POSTs require a CSRF token.
 
 - **Image:** `Dockerfile` (python:3.12-slim, non-root UID 10001, gunicorn on :8000, `HEALTHCHECK`). A second small image
   (`backup/Dockerfile`: alpine + postgresql16-client + aws-cli) runs the backup.
-- **Local:** `docker-compose.yml` — `db` (Postgres 16 on the named volume `booking_pgdata`), `init` (one-shot), `web`,
-  `reminders` (loop), `mailpit` (profile `dev`).
-- **Kubernetes (`k8s/`, kustomize):** namespace `booking`; ConfigMap (non-secret settings); Secret created out-of-band
-  (never committed); `postgres` StatefulSet with a 10Gi PVC (or use RDS and drop it); `booking-web` Deployment (2
-  replicas, probes, resource limits, read-only root FS, dropped capabilities, rolling update `maxUnavailable: 0`);
-  Service; Traefik Ingress; HPA (2–4 on CPU); `booking-init-db` Job (migrations); `booking-reminders` CronJob (every 10 min);
-  `pg-backup` CronJob (nightly, 02:30 SGT, uploads a `pg_restore -l`-verified dump to S3 using the EC2 instance role).
-- **Hosting:** one EC2 instance running k3s; HTTPS via cert-manager + Let's Encrypt. Details: [DEPLOY_AWS_EC2.md](DEPLOY_AWS_EC2.md).
-- **Update flow:** build image → import into k3s → bump `newTag` → run init Job (migrations first) → `kubectl apply -k` (rolling update).
-  Migrations must stay backward compatible with the previous release.
+- **Local:** `docker-compose.yml` — `db` (Postgres 16 on the named volume `booking_pgdata`, port 5432 on localhost only), `init`
+  (one-shot), `web` (port 8000), `reminders` (loop), `mailpit` (profile `dev`).
+- **Production:** `docker-compose.prod.yml` on one EC2 instance (`t3.small`, Ubuntu 24.04, gp3 root volume, Elastic IP):
+  - `caddy` is the only published service (80/443); it obtains and renews Let's Encrypt certificates (kept in the `caddy_data`
+    volume) and proxies to `web`. Config: `deploy/Caddyfile`, driven by `DOMAIN` and `ACME_EMAIL`.
+  - `web` (gunicorn, internal only), `init` (runs `flask init-db`, i.e. migrations, on every `up`), `reminders` (loop every 5 min),
+    `db` (PostgreSQL 16, internal only, data on the named volume `booking_pgdata` which lives on the instance's EBS volume).
+  - `backup` (profile `tools`) runs `backup/backup.sh`: `pg_dump` → verified with `pg_restore -l` → uploaded to S3 using the EC2
+    instance role. It is started by host cron at 02:30 SGT (18:30 UTC): `docker compose ... run --rm backup`. `backup/restore.sh` restores.
+  - All containers use `restart: unless-stopped` (Docker is enabled at boot), and json-file log rotation (3 × 10 MB).
+- **Availability protections (99% target):** CloudWatch alarm on `StatusCheckFailed_System` with the `ec2:recover` action; Data Lifecycle
+  Manager daily EBS snapshots (7 kept); nightly S3 dumps (30-day lifecycle); external uptime monitor on `/readyz`; 1 GiB swap.
+  The single instance means a short outage per deploy/reboot and recovery (not failover) on instance failure.
+- **Update flow:** `git pull` → `docker compose -f docker-compose.prod.yml build` → `up -d` (init applies migrations first, then
+  `web` restarts). Migrations must stay backward compatible with the previous release. Details: [DEPLOY_AWS_EC2.md](DEPLOY_AWS_EC2.md).
+- **Upgrade path:** RDS for PostgreSQL (change `DATABASE_URL`, drop `db`), then two app nodes behind a load balancer in two AZs.
 
 ## 9. Testing and CI
 
@@ -161,12 +169,14 @@ owner (a non-owner gets 404, not 403). All POSTs require a CSRF token.
   Zoom failure isolation, email/reminder behaviour, password reset, and a migration-vs-models drift check.
 - Default run uses a temporary SQLite file; set `TEST_DATABASE_URL` to run the same suite on PostgreSQL.
 - `.github/workflows/ci.yml`: lint (pyflakes) → tests on SQLite and PostgreSQL → `init-db` against PostgreSQL → build both
-  images and smoke-test `/healthz` → optional publish to ECR when the repo variable `AWS_ROLE_ARN` is set.
+  images and smoke-test `/healthz` → validate `docker-compose.yml` and `docker-compose.prod.yml` (`docker compose config`).
+  CI does not deploy; deployment is manual on the server.
 
 ## 10. Operational notes and risks
 
 - HTTPS is required in production because session cookies are `Secure`.
-- Backups live in S3 (30-day lifecycle); the in-cluster Postgres disk is a single point of failure — prefer RDS for production.
-- The instance metadata hop limit must be 2 so backup pods can use the instance role.
+- Backups live in S3 (30-day lifecycle) and EBS snapshots; the instance's disk holds the live database, so the S3 dumps are the clean recovery copy. Consider RDS as the first upgrade.
+- The instance metadata hop limit must be 2 so the backup container can use the instance role.
+- Keep `caddy_data` (certificates) across rebuilds, and keep `.env` at `chmod 600`; never commit it.
 - Amazon SES sandbox restricts recipients until production access is granted.
 - Rotate any credentials that were ever committed to the repository history (the original Telegram bot token, Zoom secret and admin password).

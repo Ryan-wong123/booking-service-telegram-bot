@@ -13,7 +13,7 @@ COPY app ./app
 COPY migrations ./migrations
 COPY wsgi.py .
 
-# Run as an unprivileged user (UID matches the Kubernetes securityContext)
+# Run as an unprivileged user
 RUN useradd --system --uid 10001 --no-create-home appuser
 USER 10001
 

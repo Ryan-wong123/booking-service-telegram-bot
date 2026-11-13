@@ -1,0 +1,98 @@
+# Production on a single EC2 instance:
+#   docker compose -f docker-compose.prod.yml up -d --build
+# Caddy (HTTPS) -> web (gunicorn) -> db (PostgreSQL on the instance's disk). See docs/DEPLOY_AWS_EC2.md.
+x-app-env: &app-env
+  env_file: .env
+  environment:
+    DATABASE_URL: postgresql://booking:${POSTGRES_PASSWORD}@db:5432/booking
+
+# Rotate container logs so they can never fill the disk.
+x-logging: &logging
+  logging:
+    driver: json-file
+    options:
+      max-size: "10m"
+      max-file: "3"
+
+services:
+  caddy:
+    image: caddy:2
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      DOMAIN: ${DOMAIN:?set DOMAIN in .env}
+      ACME_EMAIL: ${ACME_EMAIL:?set ACME_EMAIL in .env}
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data        # certificates: keep, or Let's Encrypt rate limits can lock you out
+      - caddy_config:/config
+    depends_on:
+      web:
+        condition: service_healthy
+    restart: unless-stopped
+    <<: *logging
+
+  web:
+    build: .
+    <<: [*app-env, *logging]
+    expose:
+      - "8000"                  # reachable only from Caddy on the internal network
+    depends_on:
+      init:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+  init:                         # applies migrations and seeds the first super admin; runs on every `up`
+    build: .
+    command: ["flask", "init-db"]
+    <<: [*app-env, *logging]
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: "no"
+
+  reminders:                    # emails appointment reminders; idempotent
+    build: .
+    command: ["sh", "-c", "while true; do flask send-reminders; sleep 300; done"]
+    <<: [*app-env, *logging]
+    depends_on:
+      init:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: booking
+      POSTGRES_USER: booking
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+    volumes:
+      - pgdata:/var/lib/postgresql/data   # lives on the instance's EBS volume (snapshotted daily)
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U booking -d booking"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+    <<: *logging
+
+  backup:                       # on demand / from cron:  docker compose -f docker-compose.prod.yml run --rm backup
+    build: ./backup
+    profiles: ["tools"]
+    environment:
+      PGHOST: db
+      PGPASSWORD: ${POSTGRES_PASSWORD}
+      S3_BUCKET: ${S3_BUCKET:-}
+      S3_PREFIX: ${S3_PREFIX:-booking}
+      AWS_DEFAULT_REGION: ${AWS_DEFAULT_REGION:-}
+      HOME: /tmp
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  pgdata:
+    name: booking_pgdata
+  caddy_data:
+  caddy_config:

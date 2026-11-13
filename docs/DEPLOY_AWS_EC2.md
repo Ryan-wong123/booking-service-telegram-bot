@@ -1,51 +1,76 @@
-# Deploying to AWS EC2 with Docker and Kubernetes
+# Deploying to AWS EC2 (Docker Compose, single instance)
 
-Design: **one EC2 instance running k3s** (a lightweight, certified Kubernetes distribution). Docker builds the image,
-k3s runs it. Two web replicas, PostgreSQL in the cluster, Traefik ingress (bundled with k3s).
+Design: **one EC2 instance** running Docker Compose: Caddy (automatic HTTPS) → the Flask app (gunicorn) → PostgreSQL
+on the instance's EBS disk, plus a reminder loop. This is the cheapest setup that comfortably meets a **99% availability**
+target (about 7 hours of downtime a month allowed). Approximate cost: **~$20–30/month** (`t3.small`, 20–30 GiB gp3, public IPv4,
+S3 pennies; prices vary by region, check the AWS Pricing Calculator).
 
-> Status: the manifests are syntactically validated and the app/container command was exercised locally, but the Docker
-> image build and the AWS deployment have **not** been run for you. Expect to adjust things on first deploy.
+> Status: the Compose file is validated (`docker compose config`) and CI builds the images and smoke-tests the app, but the
+> AWS steps below have **not** been run end to end. Expect to adjust small things on the first deploy.
 
-For a multi-node or production-grade setup consider Amazon EKS + RDS + ALB instead; the same image and most manifests
-carry over (drop `postgres.yaml`, point `DATABASE_URL` at RDS).
+How the 99% is protected (all three are required, see section 7):
+1. **EC2 auto-recovery** alarm: the instance is restarted on healthy hardware if AWS detects a failure (keeps its Elastic IP and disk).
+2. **Backups:** nightly verified `pg_dump` to S3, plus daily EBS snapshots.
+3. **Uptime monitor** on `/readyz` that emails you when the site is down.
+
+Limits to be aware of: one instance means a short outage (a minute or two) on every deploy and on reboots, and a real
+instance/AZ failure is a recovery, not a failover. For 99.9%+ you need a second Availability Zone (RDS Multi-AZ, two app
+nodes, a load balancer), which roughly doubles the cost.
 
 ## 1. Launch the instance
-- AMI Ubuntu 24.04 LTS, `t3.medium` (2 vCPU / 4 GiB) or larger, 30 GiB gp3 disk.
-- Security group inbound: **22** from your IP only, **80** and **443** from anywhere. Nothing else (not 5432, not 6443).
-- Allocate an **Elastic IP** and point a DNS `A` record (e.g. `booking.yourdomain.com`) at it.
+- AMI Ubuntu 24.04 LTS, **`t3.small`** (2 vCPU / 2 GiB), 20–30 GiB **gp3** root volume.
+- IAM **instance profile** (role) for the backups (section 5). Tag everything `Project=booking-portal`.
+- Security group inbound: **22** from your IP only, **80** and **443** from anywhere. Nothing else (never 5432).
+- Allocate an **Elastic IP** and point a DNS `A` record (e.g. `booking.yourdomain.com`) at it (needed for HTTPS and for auto-recovery to keep the address).
+- Let containers use the instance role (metadata hop limit 2) and require IMDSv2:
+  ```bash
+  aws ec2 modify-instance-metadata-options --instance-id i-XXXXXXXX --http-tokens required --http-put-response-hop-limit 2
+  ```
 
-## 2. Install Docker and k3s
+## 2. Prepare the server
 ```bash
-sudo apt-get update && sudo apt-get install -y docker.io git
-curl -sfL https://get.k3s.io | sh -
-sudo k3s kubectl get nodes        # should show Ready
+sudo apt-get update && sudo apt-get install -y docker.io docker-compose-v2 git
+sudo systemctl enable --now docker          # Docker (and the stack) must come back after a reboot/recovery
+sudo usermod -aG docker "$USER"             # log out and back in afterwards
+# 1 GiB swap so a memory spike doesn't kill a container on a 2 GiB machine
+sudo fallocate -l 1G /swapfile && sudo chmod 600 /swapfile && sudo mkswap /swapfile && sudo swapon /swapfile
+echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab
 ```
 
-## 3. Get the code and build the image
+## 3. Get the code and configure
 ```bash
-git clone <your repo URL> booking-portal && cd booking-portal
-git checkout web-portal           # or main once merged
-sudo docker build -t booking-portal:1.0.0 .
-sudo docker save booking-portal:1.0.0 | sudo k3s ctr images import -
-sudo docker build -t booking-backup:1.0.0 backup/       # image for the nightly S3 backup job
-sudo docker save booking-backup:1.0.0 | sudo k3s ctr images import -
+sudo mkdir -p /opt/booking && sudo chown "$USER" /opt/booking
+git clone https://github.com/Ryan-wong123/booking-service-telegram-bot /opt/booking && cd /opt/booking
+cp .env.example .env && chmod 600 .env
 ```
-(Alternative: push to Amazon ECR and add an image pull secret; then set `newName` in `k8s/kustomization.yaml`.)
-
-## 4. Configure your domain, email and backup bucket
-- `k8s/ingress.yaml`: replace `booking.example.com`.
-- `k8s/configmap.yaml`: set `APP_BASE_URL` (your https URL, used in email links), `MAIL_FROM`, `SMTP_HOST`
-  (SES endpoint for your region), `S3_BUCKET` and `AWS_DEFAULT_REGION`.
+Edit `.env` (never commit it). Generate secrets on the server:
+```bash
+echo "SECRET_KEY=$(openssl rand -hex 32)"; echo "POSTGRES_PASSWORD=$(openssl rand -hex 16)"
+```
+Set at least: `APP_ENV=production`, `SECRET_KEY`, `POSTGRES_PASSWORD`, `DOMAIN`, `ACME_EMAIL`,
+`APP_BASE_URL=https://your.domain`, `SUPERADMIN_EMAIL`, `SUPERADMIN_PASSWORD` (12+ chars), `MAIL_FROM`,
+`SMTP_*`, `S3_BUCKET`, `AWS_DEFAULT_REGION`, `APP_TIMEZONE`. Use **new** Zoom credentials if you enable Zoom:
+the ones in the old repository history are compromised and must be revoked.
 
 ### Email with Amazon SES
 1. SES console → *Verified identities* → verify your domain (best) or the `MAIL_FROM` address.
-2. SES → *SMTP settings* → *Create SMTP credentials* (this makes an IAM user and a **separate SMTP password**; the
-   IAM secret key will not work). Put them in the secret below as `SMTP_USERNAME` / `SMTP_PASSWORD`.
-3. New SES accounts are in the **sandbox**: you can only send to verified addresses. Request *production access*
-   (SES → *Account dashboard*) before real customers use the portal.
-4. Port 587 outbound is allowed from EC2 by default (port 25 is throttled, so we don't use it).
+2. SES → *SMTP settings* → *Create SMTP credentials* (creates an IAM user and a **separate SMTP password**; the IAM
+   secret key will not work). Put them in `SMTP_USERNAME` / `SMTP_PASSWORD`; `SMTP_HOST` is `email-smtp.<region>.amazonaws.com`.
+3. New SES accounts are in the **sandbox** (verified recipients only): request *production access* before real customers use the portal.
 
-### S3 backups
+## 4. Start it
+```bash
+cd /opt/booking
+docker compose -f docker-compose.prod.yml up -d --build
+docker compose -f docker-compose.prod.yml ps
+docker compose -f docker-compose.prod.yml logs init      # "Created super admin ..." and "Database ready."
+docker compose -f docker-compose.prod.yml logs -f caddy   # certificate obtained for your domain
+curl -fsS https://booking.yourdomain.com/readyz           # {"status":"ready"}
+```
+Log in as the super admin, create a staff user and a service, publish slots, and book as a customer to test email.
+HTTPS is required: production session cookies are `Secure`, so login will not work over plain HTTP.
+
+## 5. S3 backups
 ```bash
 BUCKET=your-booking-backups; REGION=ap-southeast-1
 aws s3api create-bucket --bucket $BUCKET --region $REGION --create-bucket-configuration LocationConstraint=$REGION
@@ -56,120 +81,79 @@ cat > lifecycle.json <<'JSON'
 JSON
 aws s3api put-bucket-lifecycle-configuration --bucket $BUCKET --lifecycle-configuration file://lifecycle.json
 ```
-Attach this policy to the **EC2 instance's IAM role** (the pods use it; no AWS keys are stored in the cluster):
+Attach this policy to the **instance role** (no AWS keys are stored on the server):
 ```json
 {"Version":"2012-10-17","Statement":[
   {"Effect":"Allow","Action":["s3:PutObject","s3:GetObject"],"Resource":"arn:aws:s3:::your-booking-backups/booking/*"},
   {"Effect":"Allow","Action":"s3:ListBucket","Resource":"arn:aws:s3:::your-booking-backups"}]}
 ```
-Pods reach the instance role through the metadata service, which needs a hop limit of 2 for containers:
+Test once, then schedule it nightly at 02:30 Singapore time (18:30 UTC):
 ```bash
-aws ec2 modify-instance-metadata-options --instance-id i-XXXXXXXX --http-tokens required --http-put-response-hop-limit 2
-```
-
-## 5. Create the namespace and secrets (never commit these)
-```bash
-sudo k3s kubectl apply -f k8s/namespace.yaml
-read -rsp "Super admin password (12+ chars): " ADMINPW; echo
-PGPW=$(openssl rand -hex 16)
-sudo k3s kubectl -n booking create secret generic booking-secrets \
-  --from-literal=SECRET_KEY="$(openssl rand -hex 32)" \
-  --from-literal=POSTGRES_PASSWORD="$PGPW" \
-  --from-literal=DATABASE_URL="postgresql://booking:$PGPW@postgres:5432/booking" \
-  --from-literal=SUPERADMIN_EMAIL="you@yourdomain.com" \
-  --from-literal=SUPERADMIN_PASSWORD="$ADMINPW"
-  --from-literal=SMTP_USERNAME="..." --from-literal=SMTP_PASSWORD="..."
-# Optional Zoom: add --from-literal=ZOOM_ACCOUNT_ID=... ZOOM_CLIENT_ID=... ZOOM_CLIENT_SECRET=...
-```
-Use **new** Zoom credentials: the ones in the old repo history are compromised and must be revoked.
-
-## 6. Deploy
-```bash
-sudo k3s kubectl apply -k k8s/
-sudo k3s kubectl -n booking rollout status statefulset/postgres
-sudo k3s kubectl apply -f k8s/init-job.yaml          # applies migrations + creates the first super admin
-sudo k3s kubectl -n booking logs job/booking-init-db
-sudo k3s kubectl -n booking get pods
-```
-`kubectl apply -k` also creates two CronJobs: `booking-reminders` (every 10 min) and `pg-backup` (nightly).
-Test them right away instead of waiting:
-```bash
-sudo k3s kubectl -n booking create job --from=cronjob/pg-backup backup-test
-sudo k3s kubectl -n booking logs -f job/backup-test       # ends with "Backup complete: booking-....dump"
+cd /opt/booking && docker compose -f docker-compose.prod.yml run --rm backup      # ends with "Backup complete: booking-....dump"
 aws s3 ls s3://your-booking-backups/booking/
-sudo k3s kubectl -n booking create job --from=cronjob/booking-reminders reminders-test
-sudo k3s kubectl -n booking logs job/reminders-test       # "Sent N reminder(s)."
+( crontab -l 2>/dev/null; echo '30 18 * * * cd /opt/booking && docker compose -f docker-compose.prod.yml run --rm backup >> /var/log/booking-backup.log 2>&1' ) | crontab -
 ```
-Visit `http://booking.yourdomain.com` once DNS resolves.
+(Create the log file first with `sudo touch /var/log/booking-backup.log && sudo chown "$USER" /var/log/booking-backup.log`.)
 
-## 7. HTTPS (do this before real use)
-The app sets `Secure` session cookies in production, so **login only works over HTTPS** (or set
-`SESSION_COOKIE_SECURE: "false"` in `k8s/configmap.yaml` for a temporary HTTP test).
-
-With cert-manager and Let's Encrypt:
+**Restore** is destructive (replaces current data). Rehearse it once on a scratch instance:
 ```bash
-sudo k3s kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.16.2/cert-manager.yaml
+docker compose -f docker-compose.prod.yml run --rm --entrypoint /usr/local/bin/restore.sh backup                    # lists backups
+docker compose -f docker-compose.prod.yml run --rm --entrypoint /usr/local/bin/restore.sh backup booking-20261108T183000Z.dump
 ```
-```yaml
-# clusterissuer.yaml  (set your email)
-apiVersion: cert-manager.io/v1
-kind: ClusterIssuer
-metadata: { name: letsencrypt }
-spec:
-  acme:
-    server: https://acme-v02.api.letsencrypt.org/directory
-    email: you@yourdomain.com
-    privateKeySecretRef: { name: letsencrypt-key }
-    solvers:
-      - http01: { ingress: { ingressClassName: traefik } }
+
+## 6. Reminders
+The `reminders` service runs `flask send-reminders` every 5 minutes and sends each reminder once (retries if SMTP fails).
+Check it with `docker compose -f docker-compose.prod.yml logs --tail=20 reminders`.
+
+## 7. Availability protections (do all three)
+**a) EC2 auto-recovery** (replace the instance ID, region and, optionally, an SNS topic that emails you):
+```bash
+aws cloudwatch put-metric-alarm --alarm-name booking-auto-recover --namespace AWS/EC2 \
+  --metric-name StatusCheckFailed_System --dimensions Name=InstanceId,Value=i-XXXXXXXX \
+  --statistic Maximum --period 60 --evaluation-periods 2 --threshold 1 \
+  --comparison-operator GreaterThanOrEqualToThreshold \
+  --alarm-actions arn:aws:automate:ap-southeast-1:ec2:recover
 ```
-Then add to `k8s/ingress.yaml`:
-```yaml
-metadata:
-  annotations:
-    cert-manager.io/cluster-issuer: letsencrypt
-spec:
-  tls:
-    - hosts: [booking.yourdomain.com]
-      secretName: booking-tls
+Also consider an alarm on `StatusCheckFailed_Instance` with action `arn:aws:automate:ap-southeast-1:ec2:reboot`
+(it recovers from a hung OS). Recovery keeps the Elastic IP and EBS data; containers restart by themselves
+(`restart: unless-stopped` + Docker enabled at boot).
+
+**b) Daily EBS snapshots** (Data Lifecycle Manager; keeps 7). Snapshots are crash-consistent: fine for disaster recovery, but the S3
+dump is your clean, verified copy.
+```bash
+aws dlm create-default-role     # once per account, if not done before
+aws dlm create-lifecycle-policy --description "booking daily" --state ENABLED \
+  --execution-role-arn arn:aws:iam::ACCOUNT_ID:role/AWSDataLifecycleManagerDefaultRole \
+  --policy-details '{"ResourceTypes":["VOLUME"],"TargetTags":[{"Key":"Project","Value":"booking-portal"}],
+    "Schedules":[{"Name":"daily","CreateRule":{"Interval":24,"IntervalUnit":"HOURS","Times":["19:00"]},
+    "RetainRule":{"Count":7},"CopyTags":true}]}'
 ```
-and `sudo k3s kubectl apply -f clusterissuer.yaml -f k8s/ingress.yaml`.
+(The volume must carry the `Project=booking-portal` tag.)
+
+**c) Uptime monitor** on `https://booking.yourdomain.com/readyz` (it checks the database too), alerting your email.
+UptimeRobot's free tier (5-minute checks) is enough. Route 53 health checks also work but are billed (small amount per check).
+Without this you will find out about outages from your users.
 
 ## 8. Updating
 ```bash
-git pull
-sudo docker build -t booking-portal:1.0.1 .
-sudo docker save booking-portal:1.0.1 | sudo k3s ctr images import -
-# bump newTag in k8s/kustomization.yaml to 1.0.1, then:
-sudo k3s kubectl -n booking delete job booking-init-db --ignore-not-found
-sudo k3s kubectl apply -f k8s/init-job.yaml            # applies any new migrations first
-sudo k3s kubectl -n booking wait --for=condition=complete job/booking-init-db --timeout=120s
-sudo k3s kubectl apply -k k8s/                         # rolling update, zero downtime (2 replicas)
-sudo k3s kubectl -n booking rollout status deploy/booking-web
+cd /opt/booking && git pull
+docker compose -f docker-compose.prod.yml build            # build first, so downtime is just the restart
+docker compose -f docker-compose.prod.yml up -d            # init applies migrations, then web restarts (about a minute)
+docker compose -f docker-compose.prod.yml ps
 ```
-Migrations run **before** the new pods, so keep each migration backward compatible with the previous release
-(add columns before using them; remove them a release later). Take a backup first for risky changes (see below).
-CI (`.github/workflows/ci.yml`) runs the tests, builds the images and checks the migrations on every push/PR;
-deploying is still the manual steps above. To publish images to ECR automatically, set the repository variables
-`AWS_ROLE_ARN`, `AWS_REGION` and `ECR_REPOSITORY` (IAM role trusting GitHub OIDC).
+Migrations run before the new web container starts; keep each migration backward compatible with the previous release.
+Take a manual backup first for risky changes. CI (`.github/workflows/ci.yml`) tests every push/PR and builds the images, but
+deploying is these manual steps.
 
 ## 9. Operations
 ```bash
-sudo k3s kubectl -n booking logs deploy/booking-web --tail=100 -f
-sudo k3s kubectl -n booking scale deploy/booking-web --replicas=3   # the HPA also scales 2-4 on CPU
-sudo k3s kubectl -n booking rollout restart deploy/booking-web
-sudo k3s kubectl -n booking exec -it deploy/booking-web -- flask --app wsgi create-user EMAIL "Name" staff
+docker compose -f docker-compose.prod.yml logs -f web                  # app logs (rotated: 3 x 10 MB)
+docker compose -f docker-compose.prod.yml restart web
+docker compose -f docker-compose.prod.yml exec web flask create-user EMAIL "Name" staff
+docker compose -f docker-compose.prod.yml exec db psql -U booking -d booking
+df -h /; docker system df                                              # watch disk; prune old images occasionally
 ```
-- **Backups / restore:** the nightly job uploads a verified dump to S3 (30-day lifecycle above). Restore is destructive,
-  so do it deliberately, and rehearse it once on a scratch database:
-  ```bash
-  sudo k3s kubectl -n booking run restore --rm -it --restart=Never --image=booking-backup:1.0.0 \
-    --image-pull-policy=IfNotPresent --command -- /usr/local/bin/restore.sh      # lists backups
-  # then, with the chosen file (needs env: S3_BUCKET, PGHOST=postgres, PGPASSWORD from the secret):
-  #   restore.sh booking-20261108T183000Z.dump
-  ```
-  For a fresh node: redeploy, then restore into the new database before opening it to users.
-- **Reminders:** inspect with `kubectl -n booking get cronjob,jobs`; failures show in `kubectl -n booking logs job/<name>`.
-  If SMTP is down, reminders are retried automatically on the next run until the appointment starts.
-- **Hardening:** keep SSH to your IP, enable automatic security updates, and consider AWS Systems Manager Session Manager instead of open SSH.
-- **Costs:** the instance, its EBS volume and the Elastic IP are billed while they exist.
+- **Security updates:** `sudo apt-get update && sudo apt-get upgrade`, then reboot in a quiet period (the stack restarts itself). Consider `unattended-upgrades`.
+- **Hardening:** keep SSH limited to your IP (or use AWS Systems Manager Session Manager instead), never expose 5432, keep `.env` at `chmod 600`.
+- **Costs:** the instance, its EBS volume, snapshots, the Elastic IP (public IPv4 is billed) and S3 are charged while they exist.
+- **Growing later:** move PostgreSQL to RDS (change `DATABASE_URL`, remove the `db` service), run two app nodes behind a load balancer across two AZs.

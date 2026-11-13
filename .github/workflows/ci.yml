@@ -64,35 +64,14 @@ jobs:
             -e DATABASE_URL=postgresql://x:x@127.0.0.1:1/x booking-portal:ci
           for i in $(seq 1 20); do curl -fsS localhost:8000/healthz && exit 0; sleep 1; done
           docker logs web; exit 1
+      - name: Validate Compose files
+        run: |
+          cp .env.example .env
+          docker compose config -q
+          docker compose -f docker-compose.prod.yml config -q
       - name: Build backup image
         uses: docker/build-push-action@v6
         with:
           context: backup
           push: false
           tags: booking-backup:ci
-
-  # Optional: publish to Amazon ECR from main. Enabled only when the repository variable AWS_ROLE_ARN is set
-  # (an IAM role trusting GitHub's OIDC provider). Also set the variables AWS_REGION and ECR_REPOSITORY.
-  publish:
-    needs: images
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.AWS_ROLE_ARN != ''
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      id-token: write
-    steps:
-      - uses: actions/checkout@v4
-      - uses: aws-actions/configure-aws-credentials@v4
-        with:
-          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
-          aws-region: ${{ vars.AWS_REGION }}
-      - id: ecr
-        uses: aws-actions/amazon-ecr-login@v2
-      - uses: docker/setup-buildx-action@v3
-      - uses: docker/build-push-action@v6
-        with:
-          context: .
-          push: true
-          tags: |
-            ${{ steps.ecr.outputs.registry }}/${{ vars.ECR_REPOSITORY }}:${{ github.sha }}
-            ${{ steps.ecr.outputs.registry }}/${{ vars.ECR_REPOSITORY }}:latest

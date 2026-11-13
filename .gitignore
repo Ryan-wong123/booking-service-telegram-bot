@@ -6,4 +6,3 @@ __pycache__/
 instance/
 *.db
 .pytest_cache/
-k8s/secret.yaml

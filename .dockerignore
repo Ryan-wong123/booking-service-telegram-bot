@@ -7,6 +7,6 @@ __pycache__/
 *.db
 instance/
 tests/
-k8s/
+deploy/
 docs/
 .pytest_cache/

@@ -21,12 +21,12 @@ Telegram features have been removed.)
 - Deactivating or demoting a staff member cancels their upcoming bookings; customers see the reason in their account.
 - **Email** (Amazon SES SMTP or any SMTP server): booking confirmations to customer and host, cancellation and
   reschedule notices to the other party (with the reason), and a reminder `REMINDER_HOURS` (default 24) before the
-  appointment. Reminders run from a CronJob / compose service and are sent exactly once (retried if delivery fails).
+  appointment. Reminders run from a small loop service in Docker Compose and are sent exactly once (retried if delivery fails).
 - **Password reset** by emailed single-use link (expires after `RESET_TOKEN_MINUTES`, throttled, no account
   enumeration), plus change-password on the Account page.
 - **Database migrations** with Flask-Migrate/Alembic (`migrations/`); a test fails if the models and migrations drift.
 - **Backups** of PostgreSQL to S3 (verified before upload) with a restore script.
-- **CI** (GitHub Actions): lint, tests on SQLite and PostgreSQL, migration check, image build + smoke test, optional ECR publish.
+- **CI** (GitHub Actions): lint, tests on SQLite and PostgreSQL, migration check, image build + smoke test, Compose file validation.
 - `/healthz` (liveness) and `/readyz` (database) endpoints; structured logs to stdout.
 
 ## Configuration (environment variables)
@@ -81,21 +81,24 @@ Over plain HTTP set `SESSION_COOKIE_SECURE=false`, otherwise browsers drop the l
 - [docs/Architecture.md](docs/Architecture.md) — structure, data model, routes, deployment
 - [docs/Agents.md](docs/Agents.md) — rules for AI agents and contributors (**PRD and Architecture must be updated with every change**)
 
-## Deploy to AWS EC2 with Docker + Kubernetes
-See **[docs/DEPLOY_AWS_EC2.md](docs/DEPLOY_AWS_EC2.md)** (single EC2 node running k3s; manifests in `k8s/`).
+## Deploy to AWS EC2 (Docker Compose, single instance)
+See **[docs/DEPLOY_AWS_EC2.md](docs/DEPLOY_AWS_EC2.md)**: one `t3.small` running `docker-compose.prod.yml` (Caddy for automatic HTTPS,
+the app, PostgreSQL on the instance disk), with EC2 auto-recovery, nightly S3 backups, EBS snapshots and an uptime monitor
+to protect a 99% availability target at roughly $20-30/month.
 
 ## Layout
 ```
 app/                Flask application (blueprints: auth, customer, staff, admin, health)
 app/services/       booking rules (booking.py) and optional Zoom client (zoom.py)
 app/templates/      Jinja templates (Bootstrap via CDN)
-k8s/                Kubernetes manifests (kustomize)
+deploy/             Caddyfile for the production reverse proxy
+backup/             S3 backup and restore scripts + image
 tests/              pytest suite
-Dockerfile, docker-compose.yml, wsgi.py
+Dockerfile, docker-compose.yml (local), docker-compose.prod.yml (EC2), wsgi.py
 ```
 
 ## Known limitations
 - Email is plain text and in-app only for status; there is no SMS/push channel.
 - Amazon SES starts in *sandbox* mode (can only email verified addresses): request production access before launch.
-- A reminder goes out once per booking, `REMINDER_HOURS` before the start (the CronJob runs every 10 minutes).
-- Single-region, single-node by default (k3s on one EC2 instance). See the deploy guide for what that implies.
+- A reminder goes out once per booking, `REMINDER_HOURS` before the start (the reminder loop runs every 5 minutes).
+- Single instance by design (cost): a deploy or reboot causes a short outage and an instance failure is a recovery, not a failover. Meets ~99%, not 99.9%.
